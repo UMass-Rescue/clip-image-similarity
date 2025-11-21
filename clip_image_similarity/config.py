@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 def _validate_input_dir(path: Path) -> Path:
@@ -45,6 +45,11 @@ class RunConfig:
     batch_size: int
     device: str
     image_exts: Tuple[str, ...]
+    pairwise_format: str = "parquet"  # parquet|json
+    pairwise_dtype: str = "float32"  # float32|float16
+    pairwise_chunk_size_pairs: int = 5_000_000
+    pairwise_compression: Optional[str] = None  # e.g., zstd, gzip, or None
+    pairwise_compression_level: Optional[int] = None
     overwrite: bool = False
 
     def __post_init__(self) -> None:
@@ -52,6 +57,16 @@ class RunConfig:
         self.input_dir = _validate_input_dir(self.input_dir)
         self.output_dir = self.output_dir.resolve()
         self.image_exts = _normalize_exts(self.image_exts)
+        self.pairwise_format = self.pairwise_format.lower()
+        if self.pairwise_format not in {"parquet", "json"}:
+            raise ValueError("pairwise_format must be 'parquet' or 'json'")
+        self.pairwise_dtype = self.pairwise_dtype.lower()
+        if self.pairwise_dtype not in {"float32", "float16"}:
+            raise ValueError("pairwise_dtype must be 'float32' or 'float16'")
+        if self.pairwise_chunk_size_pairs <= 0:
+            raise ValueError("pairwise_chunk_size_pairs must be positive")
+        if self.pairwise_compression:
+            self.pairwise_compression = self.pairwise_compression.lower()
 
     def ensure_output_dir(self) -> None:
         """Create the output directory and parents if they don't exist."""

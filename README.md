@@ -43,10 +43,12 @@ python -m clip_image_similarity.cli \
   --device cuda
 ```
 
-Outputs:
+Outputs (parquet by default):
 - `file_to_id_map/anon_id_map.json`: absolute path to anonymous numeric ID map (**DO NOT SHARE THIS FILE IF YOU NEED TO KEEP FILE NAMES PRIVATE**).
-- `evaluation_results/pairwise_clip_compare.json`: all unordered pairwise distances `(1 - cosine_similarity)` using only anonymous IDs.
+- `evaluation_results/pairwise_clip_compare.parquet`: all unordered pairwise distances `(1 - cosine_similarity)` using only anonymous IDs (columnar, compressed if you pass `--parquet-compression`).
 - `config.json`: run configuration snapshot
+
+If you need JSON instead (less efficient, larger memory use), add `--pairwise-format json` and the output will be `evaluation_results/pairwise_clip_compare.json`.
 
 Progress bars and timestamped logs show progress through discovery, embedding, and distance calculation.
 
@@ -56,7 +58,7 @@ Progress bars and timestamped logs show progress through discovery, embedding, a
 - `config.json`: Snapshot of the run configuration (paths, model id, etc.).
 
 ## Compute mAP (optional)
-After generating results, you can compute Mean Average Precision from labels and the pairwise distances:
+After generating results, you can compute Mean Average Precision from labels and the pairwise distances (use JSON output from the main run via `--pairwise-format json` or convert the Parquet to JSON):
 ```bash
 python metrics/map.py \
   --labels ./labels.json \

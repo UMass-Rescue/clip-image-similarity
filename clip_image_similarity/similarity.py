@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import torch
 from tqdm.auto import tqdm
 
 from .utils import log
+from . import parquet_writer
 
 
 class SimilarityComputer:
@@ -14,16 +15,19 @@ class SimilarityComputer:
         """Create a SimilarityComputer that will operate on the specified device."""
         self.device = device
 
-    def cosine_similarity_matrix(self, embeddings: torch.Tensor) -> torch.Tensor:
+    def cosine_similarity_matrix(
+        self, embeddings: torch.Tensor, dtype: torch.dtype = torch.float32
+    ) -> torch.Tensor:
         """Compute a full cosine similarity matrix on the chosen device.
 
         Args:
             embeddings: CPU tensor of shape (N, D) representing image embeddings.
+            dtype: Torch dtype for similarity/distances (e.g., torch.float32 or torch.float16).
         Returns:
             CPU tensor of shape (N, N) with cosine similarities.
         """
         log("Computing cosine similarity matrix...")
-        x = embeddings.to(self.device)
+        x = embeddings.to(self.device, dtype=dtype)
         x = torch.nn.functional.normalize(x, p=2, dim=1)
         sim = x @ x.T
         log("Similarity matrix computed.")
@@ -39,6 +43,52 @@ class SimilarityComputer:
             Distance matrix computed as 1 - sim_matrix.
         """
         return 1.0 - sim_matrix
+
+    @staticmethod
+    def stream_upper_triangle_to_parquet(
+        dist_matrix: torch.Tensor,
+        ids: Sequence[str],
+        output_path: Path,
+        *,
+        chunk_size_pairs: int = 5_000_000,
+        compression: str | None = None,
+        compression_level: int | None = None,
+    ) -> None:
+        """Stream upper-triangular pairwise distances to a Parquet file.
+
+        Args:
+            dist_matrix: Square distance matrix (N, N), can be on CPU or GPU.
+            ids: Ordered list of anon IDs aligned with matrix indices.
+            output_path: Destination Parquet path.
+            chunk_size_pairs: Number of pairs per chunk when writing.
+            compression: Parquet compression codec (e.g., 'zstd', None for no compression).
+            compression_level: Optional compression level for the codec (e.g., zstd level).
+        """
+        n = dist_matrix.shape[0]
+        if dist_matrix.shape[1] != n:
+            raise ValueError("Distance matrix must be square.")
+        if len(ids) != n:
+            raise ValueError("Length of ids must match distance matrix dimension.")
+        device = dist_matrix.device
+        idx_i_full, idx_j_full = torch.triu_indices(n, n, offset=1, device=device)
+        total_pairs = idx_i_full.numel()
+
+        def _iter_chunks():
+            for start in range(0, total_pairs, chunk_size_pairs):
+                end = min(start + chunk_size_pairs, total_pairs)
+                idx_i_chunk = idx_i_full[start:end]
+                idx_j_chunk = idx_j_full[start:end]
+                dist_chunk = dist_matrix[idx_i_chunk, idx_j_chunk].cpu().tolist()
+                yield idx_i_chunk.cpu().tolist(), idx_j_chunk.cpu().tolist(), dist_chunk
+
+        parquet_writer.write_pairwise_parquet(
+            idx_iter=_iter_chunks(),
+            ids=ids,
+            output_path=output_path,
+            compression=compression,
+            compression_level=compression_level,
+            chunk_size=None,
+        )
 
     def pairwise_distances(
         self,
@@ -74,25 +124,3 @@ class SimilarityComputer:
 
         log("Pairwise distance collection complete.")
         return results
-
-
-def compute_similarity_and_distances(
-    embeddings: torch.Tensor,
-    device: str,
-    image_paths: List[Path],
-    id_map: Dict[str, str],
-) -> List[dict]:
-    """Compute full similarity and distance matrices then flatten to pairwise records.
-
-    Args:
-        embeddings: CPU embeddings tensor (N, D).
-        device: Device string for similarity computation.
-        image_paths: Ordered image paths.
-        id_map: Mapping of image path string to anon ID string.
-    Returns:
-        List of pairwise distance dicts.
-    """
-    computer = SimilarityComputer(device=device)
-    sim = computer.cosine_similarity_matrix(embeddings)
-    dist = computer.similarity_to_distance(sim)
-    return computer.pairwise_distances(image_paths, id_map, dist)
