@@ -54,3 +54,28 @@ Progress bars and timestamped logs show progress through discovery, embedding, a
 - `file_to_id_map/anon_id_map.json`: Maps absolute file paths to anonymous IDs. **Do not share this file** if you need to keep file names private.
 - `evaluation_results/pairwise_clip_compare.json`: Pairwise distances using only anonymous IDs. **This file alone is sufficient to share results without revealing paths.**
 - `config.json`: Snapshot of the run configuration (paths, model id, etc.).
+
+## Compute mAP (optional)
+After generating results, you can compute Mean Average Precision from labels and the pairwise distances:
+```bash
+python metrics/map.py \
+  --labels ./labels.json \
+  --pairwise ./results/evaluation_results/pairwise_clip_compare.json \
+  --output_csv ./results/metrics/map.csv
+```
+
+### Optional: Generate anonymous labels then compute mAP
+1) Convert labeled paths to anon IDs (keeps file names private in the labels JSON):
+```bash
+python label_helpers/labels_to_anon_ids.py \
+  --labels ./resources/labels/images_series_labels.json \
+  --anon-map ./results/file_to_id_map/anon_id_map.json \
+  --output ./results/anon_labels.json
+```
+2) Run mAP using the anon labels and pairwise distances (evaluates retrieval quality on anonymous IDs):
+```bash
+python metrics/map.py \
+  --labels ./results/anon_labels.json \
+  --pairwise ./results/evaluation_results/pairwise_clip_compare.json \
+  --output_csv ./results/map.csv
+```
