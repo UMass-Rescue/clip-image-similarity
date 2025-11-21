@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clip-pairwise-eval"
+version = "0.1.0"
+description = "Compute pairwise CLIP image distances with anonymous path mapping."
+readme = "README.md"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "open_clip_torch",
+    "pillow",
+    "tqdm",
+]
+
+[project.scripts]
+clip-pairwise-eval = "clip_image_similarity.cli:main"
