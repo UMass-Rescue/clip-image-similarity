@@ -1,43 +1,43 @@
 {
     "Barbara_Walters": [
-        "./resources/images/Barbara_Walters_0001.jpg",
-        "./resources/images/Barbara_Walters_0002.jpg",
-        "./resources/images/Barbara_Walters_0003.jpg",
-        "./resources/images/Barbara_Walters_0004.jpg"
+        "/Users/prasannals/clip-image-similarity/resources/images/Barbara_Walters_0001.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Barbara_Walters_0002.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Barbara_Walters_0003.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Barbara_Walters_0004.jpg"
     ],
     "bridge": [
-        "./resources/images/bridge-1-original.jpg",
-        "./resources/images/bridge-2-rotate-90.jpg",
-        "./resources/images/bridge-3-rotate-180.jpg",
-        "./resources/images/bridge-4-rotate-270.jpg",
-        "./resources/images/bridge-5-flipx.jpg",
-        "./resources/images/bridge-6-flipy.jpg",
-        "./resources/images/bridge-7-flip-plus-1.jpg",
-        "./resources/images/bridge-8-flip-minus-1.jpg"
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-1-original.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-2-rotate-90.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-3-rotate-180.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-4-rotate-270.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-5-flipx.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-6-flipy.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-7-flip-plus-1.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/bridge-8-flip-minus-1.jpg"
     ],
     "Christopher_Walken": [
-        "./resources/images/Christopher_Walken_0001.jpg",
-        "./resources/images/Christopher_Walken_0002.jpg",
-        "./resources/images/Christopher_Walken_0003.jpg",
-        "./resources/images/Christopher_Walken_0004.jpg"
+        "/Users/prasannals/clip-image-similarity/resources/images/Christopher_Walken_0001.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Christopher_Walken_0002.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Christopher_Walken_0003.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Christopher_Walken_0004.jpg"
     ],
     "Claire_Danes": [
-        "./resources/images/Claire_Danes_0001.jpg",
-        "./resources/images/Claire_Danes_0002.jpg",
-        "./resources/images/Claire_Danes_0003.jpg"
+        "/Users/prasannals/clip-image-similarity/resources/images/Claire_Danes_0001.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Claire_Danes_0002.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/Claire_Danes_0003.jpg"
     ],
     "aaa": [
-        "./resources/images/aaa-orig.jpg",
-        "./resources/images/blur-a-little.jpg",
-        "./resources/images/blur-a-lot.jpg",
-        "./resources/images/high-contrast.jpg",
-        "./resources/images/high-saturation.jpg",
-        "./resources/images/sharpen-a-little.jpg",
-        "./resources/images/sharpen-a-lot.jpg",
-        "./resources/images/shrink-a-little.jpg",
-        "./resources/images/shrink-a-lot.jpg",
-        "./resources/images/square-128x128.jpg",
-        "./resources/images/square-256x256.jpg",
-        "./resources/images/square-512x512.jpg"
+        "/Users/prasannals/clip-image-similarity/resources/images/aaa-orig.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/blur-a-little.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/blur-a-lot.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/high-contrast.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/high-saturation.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/sharpen-a-little.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/sharpen-a-lot.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/shrink-a-little.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/shrink-a-lot.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/square-128x128.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/square-256x256.jpg",
+        "/Users/prasannals/clip-image-similarity/resources/images/square-512x512.jpg"
     ]
 }
