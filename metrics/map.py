@@ -192,6 +192,22 @@ def build_rankings(
     return rankings
 
 
+def filter_entries_to_labeled(entries: List[dict], labeled_set: Set[str]) -> List[dict]:
+    """Filter pairwise entries to pairs where both images are labeled and not self-pairs.
+
+    Args:
+        entries: List of pairwise distance entries.
+        labeled_set: Set of labeled image identifiers.
+    Returns:
+        Filtered list of entries containing only labeled pairs.
+    """
+    return [
+        e
+        for e in entries
+        if e["image1"] in labeled_set and e["image2"] in labeled_set and e["image1"] != e["image2"]
+    ]
+
+
 # ----------------------------
 # AP / mAP computation
 # ----------------------------
@@ -359,10 +375,25 @@ def main():
         help="Path to pairwise results JSON from pairwise_test.py.",
     )
     parser.add_argument("--output_csv", required=True, help="Output CSV path.")
+    parser.add_argument(
+        "--labeled-images-only",
+        action="store_true",
+        help="If set, filter pairwise entries to pairs where both images are labeled (self-pairs dropped).",
+    )
     args = parser.parse_args()
 
     series_to_images = load_labels(args.labels)
     entries = load_pairwise(args.pairwise)
+    if args.labeled_images_only:
+        labeled_set = set().union(*series_to_images.values())
+        original_len = len(entries)
+        entries = filter_entries_to_labeled(entries, labeled_set)
+        filtered_len = len(entries)
+        if filtered_len == 0:
+            raise ValueError("After filtering to labeled images only, no pairwise entries remain.")
+        print(
+            f"Filtered pairwise entries to labeled images only (removed {original_len - filtered_len} of {original_len})."
+        )
     validate_inputs(series_to_images, entries)
 
     # Build rankings and compute mAP
