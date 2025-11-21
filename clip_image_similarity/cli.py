@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from .config import RunConfig
+from .embeddings import compute_image_embeddings
+from .path_id_store import build_id_map_for_paths, create_path_id_store
+from .serialization import save_config, save_json
+from .similarity import compute_similarity_and_distances
+from .utils import DEFAULT_EXTS, configure_logging, default_device, find_images, log, plural
+
+
+def parse_args_to_config() -> RunConfig:
+    """Parse CLI arguments into a validated RunConfig.
+
+    Returns:
+        RunConfig populated from CLI flags with defaults for device, batch size, and extensions.
+    """
+    parser = argparse.ArgumentParser(description="Compute pairwise CLIP distances for images in a folder.")
+    parser.add_argument("--input-dir", "-i", required=True, help="Root directory containing images.")
+    parser.add_argument("--output-dir", "-o", required=True, help="Directory where results will be written.")
+    parser.add_argument(
+        "--model",
+        "-m",
+        default="hf-hub:apple/DFN5B-CLIP-ViT-H-14-384",
+        help="Hugging Face Hub model id for OpenCLIP (e.g. hf-hub:apple/DFN5B-CLIP-ViT-H-14-384).",
+    )
+    parser.add_argument("--batch-size", "-b", type=int, default=32, help="Batch size for embedding computation.")
+    parser.add_argument("--device", "-d", default=None, help="Device to run on (e.g. cuda, cuda:0, cpu). Defaults to CUDA if available.")
+    parser.add_argument(
+        "--image-exts",
+        default=",".join(DEFAULT_EXTS),
+        help="Comma-separated list of image extensions to include (defaults to common formats).",
+    )
+    parser.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output files.")
+
+    args = parser.parse_args()
+
+    input_dir = Path(args.input_dir).resolve()
+    output_dir = Path(args.output_dir).resolve()
+
+    if args.image_exts:
+        raw_exts = [e.strip() for e in args.image_exts.split(",") if e.strip()]
+        image_exts = tuple(e if e.startswith(".") else f".{e}" for e in raw_exts)
+    else:
+        image_exts = DEFAULT_EXTS
+
+    device = args.device or default_device()
+
+    return RunConfig(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        model_id=args.model,
+        batch_size=args.batch_size,
+        device=device,
+        image_exts=image_exts,
+        overwrite=args.overwrite,
+    )
+
+
+def run(config: RunConfig) -> None:
+    """Execute the full pipeline from discovery through saving results.
+
+    Args:
+        config: RunConfig instance describing inputs, outputs, and model settings.
+    """
+    if config.output_dir.exists() and not config.overwrite:
+        raise FileExistsError(
+            f"Output directory {config.output_dir} already exists. Use --overwrite to replace existing results."
+        )
+    config.ensure_output_dir()
+    configure_logging(config.output_dir / "run.log")
+    log("Starting pairwise CLIP evaluation run...")
+    log(f"Using model '{config.model_id}' on device '{config.device}'.")
+    log(f"Writing outputs under {config.output_dir}.", allow_file=False)
+
+    log(f"Searching for images under {config.input_dir} with extensions {config.image_exts}...", allow_file=False)
+    image_paths = find_images(config.input_dir, config.image_exts)
+    if not image_paths:
+        raise RuntimeError(f"No images found in {config.input_dir} with extensions {config.image_exts}")
+    log(f"Found {plural(len(image_paths), 'image')} to process.")
+
+    log("Assigning anonymous IDs to image paths...")
+    id_store = create_path_id_store(config.output_dir)
+    id_map = build_id_map_for_paths(id_store, image_paths)
+    id_store.save()
+    log("Anonymous ID map saved.")
+
+    embeddings = compute_image_embeddings(
+        image_paths=image_paths,
+        model_id=config.model_id,
+        device=config.device,
+        batch_size=config.batch_size,
+    )
+
+    results = compute_similarity_and_distances(
+        embeddings=embeddings,
+        device=config.device,
+        image_paths=image_paths,
+        id_map=id_map,
+    )
+
+    pairwise_path = config.output_dir / "evaluation_results" / "pairwise_clip_compare.json"
+    if pairwise_path.exists() and not config.overwrite:
+        raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
+
+    save_json(results, pairwise_path)
+    save_config(config, config.output_dir)
+
+    log("Run complete.")
+    log(f"Saved pairwise distances to {pairwise_path}", allow_file=False)
+    log(f"Processed {plural(len(image_paths), 'image')} using model {config.model_id} on {config.device}.")
+
+
+def main() -> None:
+    """Entry point for `python -m clip_image_similarity.cli`; parse args and run the pipeline."""
+    config = parse_args_to_config()
+    run(config)
+
+
+if __name__ == "__main__":
+    main()
