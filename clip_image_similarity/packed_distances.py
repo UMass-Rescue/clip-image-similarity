@@ -53,7 +53,7 @@ class PackedDistances:
         return float(self.flat[idx])
 
     @classmethod
-    def load(cls, path: Path, key: str = "distances") -> "PackedDistances":
+    def load(cls, path: Path, key: str = "distances") -> PackedDistances:
         """Load a packed distance array from an .npz file."""
         data = np.load(path, allow_pickle=False)
         if key not in data:
@@ -64,4 +64,4 @@ class PackedDistances:
     def save(flat: np.ndarray, path: Path, key: str = "distances") -> None:
         """Save a packed distance array to an .npz file."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(path, **{key: flat})
+        np.savez_compressed(path, **{key: flat}, allow_pickle=False)

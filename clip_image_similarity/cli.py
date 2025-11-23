@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List
 
+import numpy as np
 import torch
 
 from .config import RunConfig
@@ -119,7 +119,6 @@ def run(config: RunConfig) -> None:
     if pairwise_path.exists() and not config.overwrite:
         raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
     log(f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype}).")
-    import numpy as np  # local import
     flat_np = flatten_upper_triangle(dist).cpu().numpy()
     np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
     flat_np = flat_np.astype(np_dtype, copy=False)

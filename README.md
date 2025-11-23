@@ -40,7 +40,7 @@ python -m clip_image_similarity.cli \
 
 ## Outputs
 - `evaluation_results/pairwise_distances.npz`: flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`.
-- `image_paths.json`: ordered list of image paths corresponding to indices in the flattened array. **Do not share this file if paths are sensitive.**
+- `image_paths.json`: ordered list of image paths corresponding to indices in the flattened array. **DO NOT SHARE THIS FILE IF YOU NEED TO KEEP FILE NAMES PRIVATE**
 - `series_to_indices.json` (optional): only written if `--anonymize-labels` is provided; maps series -> list of indices for downstream mAP without exposing paths.
 - `config.json`: run configuration snapshot.
 
