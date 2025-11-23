@@ -45,7 +45,7 @@ def parse_args_to_config() -> RunConfig:
         "--pairwise-dtype",
         choices=["float32", "float16"],
         default="float32",
-        help="Numeric precision for similarity/distance computation (default: float32).",
+        help="Numeric precision used when storing pairwise distances (default: float32).",
     )
     parser.add_argument(
         "--pairwise-chunk-size-pairs",
@@ -130,10 +130,11 @@ def run(config: RunConfig) -> None:
         batch_size=config.batch_size,
     )
 
-    dtype = torch.float16 if config.pairwise_dtype == "float16" else torch.float32
     computer = SimilarityComputer(device=config.device)
-    sim = computer.cosine_similarity_matrix(embeddings, dtype=dtype)
+    sim = computer.cosine_similarity_matrix(embeddings, dtype=torch.float32)
     dist = computer.similarity_to_distance(sim)
+    if config.pairwise_dtype == "float16":
+        dist = dist.to(torch.float16)
 
     ids_in_order = [id_map[str(p)] for p in image_paths]
     eval_dir = config.output_dir / "evaluation_results"
@@ -145,7 +146,7 @@ def run(config: RunConfig) -> None:
             raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
         log(
             f"Streaming pairwise distances to Parquet at {pairwise_path} "
-            f"(dtype={config.pairwise_dtype}, compression={config.pairwise_compression or 'none'}, "
+            f"(write_dtype={config.pairwise_dtype}, compression={config.pairwise_compression or 'none'}, "
             f"chunk_size_pairs={config.pairwise_chunk_size_pairs})."
         )
         computer.stream_upper_triangle_to_parquet(
@@ -155,6 +156,7 @@ def run(config: RunConfig) -> None:
             chunk_size_pairs=config.pairwise_chunk_size_pairs,
             compression=config.pairwise_compression,
             compression_level=config.pairwise_compression_level,
+            write_dtype=torch.float16 if config.pairwise_dtype == "float16" else torch.float32,
         )
     else:
         pairwise_path = eval_dir / "pairwise_clip_compare.json"

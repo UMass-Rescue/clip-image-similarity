@@ -53,6 +53,7 @@ class SimilarityComputer:
         chunk_size_pairs: int = 5_000_000,
         compression: str | None = None,
         compression_level: int | None = None,
+        write_dtype: torch.dtype = torch.float32,
     ) -> None:
         """Stream upper-triangular pairwise distances to a Parquet file.
 
@@ -63,6 +64,7 @@ class SimilarityComputer:
             chunk_size_pairs: Number of pairs per chunk when writing.
             compression: Parquet compression codec (e.g., 'zstd', None for no compression).
             compression_level: Optional compression level for the codec (e.g., zstd level).
+            write_dtype: Torch dtype to cast distances for storage (e.g., torch.float32, torch.float16).
         """
         n = dist_matrix.shape[0]
         if dist_matrix.shape[1] != n:
@@ -73,12 +75,20 @@ class SimilarityComputer:
         idx_i_full, idx_j_full = torch.triu_indices(n, n, offset=1, device=device)
         total_pairs = idx_i_full.numel()
 
+        arrow_dtype = None
+        if write_dtype == torch.float16:
+            import pyarrow as pa  # local import to avoid hard dependency in callers
+            arrow_dtype = pa.float16()
+        else:
+            import pyarrow as pa
+            arrow_dtype = pa.float32()
+
         def _iter_chunks():
             for start in range(0, total_pairs, chunk_size_pairs):
                 end = min(start + chunk_size_pairs, total_pairs)
                 idx_i_chunk = idx_i_full[start:end]
                 idx_j_chunk = idx_j_full[start:end]
-                dist_chunk = dist_matrix[idx_i_chunk, idx_j_chunk].cpu().tolist()
+                dist_chunk = dist_matrix[idx_i_chunk, idx_j_chunk].to(write_dtype).cpu().numpy()
                 yield idx_i_chunk.cpu().tolist(), idx_j_chunk.cpu().tolist(), dist_chunk
 
         parquet_writer.write_pairwise_parquet(
@@ -88,6 +98,7 @@ class SimilarityComputer:
             compression=compression,
             compression_level=compression_level,
             chunk_size=None,
+            dist_type=arrow_dtype,
         )
 
     def pairwise_distances(
