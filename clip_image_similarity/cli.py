@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Dict, List
 
 import torch
 
 from .config import RunConfig
 from .embeddings import compute_image_embeddings
-from .path_id_store import build_id_map_for_paths, create_path_id_store
 from .serialization import save_config, save_json
 from .similarity import SimilarityComputer
+from .packed_distances import flatten_upper_triangle
+from .labels import map_labels_to_indices
 from .utils import DEFAULT_EXTS, configure_logging, default_device, find_images, log, plural
 
 
@@ -36,33 +38,15 @@ def parse_args_to_config() -> RunConfig:
         help="Comma-separated list of image extensions to include (defaults to common formats).",
     )
     parser.add_argument(
-        "--pairwise-format",
-        choices=["parquet", "json"],
-        default="parquet",
-        help="Output format for pairwise distances (default: parquet).",
-    )
-    parser.add_argument(
         "--pairwise-dtype",
         choices=["float32", "float16"],
         default="float32",
         help="Numeric precision used when storing pairwise distances (default: float32).",
     )
     parser.add_argument(
-        "--pairwise-chunk-size-pairs",
-        type=int,
-        default=5_000_000,
-        help="Number of pairs per chunk when streaming pairwise output (parquet).",
-    )
-    parser.add_argument(
-        "--parquet-compression",
+        "--anonymize-labels",
         default=None,
-        help="Parquet compression codec (e.g., zstd, gzip). Use none for no compression (default).",
-    )
-    parser.add_argument(
-        "--parquet-compression-level",
-        type=int,
-        default=None,
-        help="Compression level for the selected Parquet codec (if supported).",
+        help="Optional labels JSON (series -> list of image paths); will be converted to series -> list of indices.",
     )
     parser.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output files.")
 
@@ -79,6 +63,8 @@ def parse_args_to_config() -> RunConfig:
 
     device = args.device or default_device()
 
+    labels_path = Path(args.anonymize_labels).resolve() if args.anonymize_labels else None
+
     return RunConfig(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -86,11 +72,8 @@ def parse_args_to_config() -> RunConfig:
         batch_size=args.batch_size,
         device=device,
         image_exts=image_exts,
-        pairwise_format=args.pairwise_format,
         pairwise_dtype=args.pairwise_dtype,
-        pairwise_chunk_size_pairs=args.pairwise_chunk_size_pairs,
-        pairwise_compression=None if not args.parquet_compression or args.parquet_compression.lower() == "none" else args.parquet_compression,
-        pairwise_compression_level=args.parquet_compression_level,
+        labels_path=labels_path,
         overwrite=args.overwrite,
     )
 
@@ -117,12 +100,6 @@ def run(config: RunConfig) -> None:
         raise RuntimeError(f"No images found in {config.input_dir} with extensions {config.image_exts}")
     log(f"Found {plural(len(image_paths), 'image')} to process.")
 
-    log("Assigning anonymous IDs to image paths...")
-    id_store = create_path_id_store(config.output_dir)
-    id_map = build_id_map_for_paths(id_store, image_paths)
-    id_store.save()
-    log("Anonymous ID map saved.")
-
     embeddings = compute_image_embeddings(
         image_paths=image_paths,
         model_id=config.model_id,
@@ -136,35 +113,29 @@ def run(config: RunConfig) -> None:
     if config.pairwise_dtype == "float16":
         dist = dist.to(torch.float16)
 
-    ids_in_order = [id_map[str(p)] for p in image_paths]
     eval_dir = config.output_dir / "evaluation_results"
     eval_dir.mkdir(parents=True, exist_ok=True)
+    pairwise_path = eval_dir / "pairwise_distances.npz"
+    if pairwise_path.exists() and not config.overwrite:
+        raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
+    log(f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype}).")
+    import numpy as np  # local import
+    flat_np = flatten_upper_triangle(dist).cpu().numpy()
+    np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
+    flat_np = flat_np.astype(np_dtype, copy=False)
 
-    if config.pairwise_format == "parquet":
-        pairwise_path = eval_dir / "pairwise_clip_compare.parquet"
-        if pairwise_path.exists() and not config.overwrite:
-            raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
-        log(
-            f"Streaming pairwise distances to Parquet at {pairwise_path} "
-            f"(write_dtype={config.pairwise_dtype}, compression={config.pairwise_compression or 'none'}, "
-            f"chunk_size_pairs={config.pairwise_chunk_size_pairs})."
-        )
-        computer.stream_upper_triangle_to_parquet(
-            dist_matrix=dist,
-            ids=ids_in_order,
-            output_path=pairwise_path,
-            chunk_size_pairs=config.pairwise_chunk_size_pairs,
-            compression=config.pairwise_compression,
-            compression_level=config.pairwise_compression_level,
-            write_dtype=torch.float16 if config.pairwise_dtype == "float16" else torch.float32,
-        )
-    else:
-        pairwise_path = eval_dir / "pairwise_clip_compare.json"
-        if pairwise_path.exists() and not config.overwrite:
-            raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
-        log("Collecting pairwise distances to JSON (may be memory-intensive for large datasets).")
-        results = computer.pairwise_distances(image_paths, id_map, dist)
-        save_json(results, pairwise_path)
+    np.savez_compressed(pairwise_path, distances=flat_np, dtype=config.pairwise_dtype)
+
+    paths_json = config.output_dir / "image_paths.json"
+    save_json([p.as_posix() for p in image_paths], paths_json)
+    log(f"Saved image path ordering to {paths_json} (do not share if paths are sensitive).")
+
+    if config.labels_path:
+        log("Mapping provided labels to indices...")
+        series_indices = map_labels_to_indices(config.labels_path, image_paths)
+        series_out = config.output_dir / "series_to_indices.json"
+        save_json(series_indices, series_out)
+        log(f"Saved series->indices to {series_out} for downstream mAP.")
 
     save_config(config, config.output_dir)
 

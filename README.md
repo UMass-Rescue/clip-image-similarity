@@ -1,6 +1,6 @@
 # Clip Image Similarity
 
-CLI and library to scan a folder of images, embed them with a CLIP model, and produce a full pairwise distance list using anonymous IDs so raw file paths stay private.
+CLI and library to embed a folder of images with a CLIP model and export a compact, flattened pairwise distance array for series retrieval evaluation.
 
 ## Quickstart
 
@@ -26,11 +26,6 @@ make run \
   OVERWRITE=1
 ```
 
-Example (CPU) mirroring a full run:
-```bash
-make run INPUT_DIR=./resources/images OUTPUT_DIR=./results MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 BATCH_SIZE=32 DEVICE=cpu OVERWRITE=1
-```
-
 Option 2: Create venv with Makefile, then run Python manually
 ```bash
 make install                     # sets up .venv and installs requirements
@@ -43,41 +38,21 @@ python -m clip_image_similarity.cli \
   --device cuda
 ```
 
-Outputs (parquet by default):
-- `file_to_id_map/anon_id_map.json`: absolute path to anonymous numeric ID map (**DO NOT SHARE THIS FILE IF YOU NEED TO KEEP FILE NAMES PRIVATE**).
-- `evaluation_results/pairwise_clip_compare.parquet`: all unordered pairwise distances `(1 - cosine_similarity)` using only anonymous IDs (columnar, compressed if you pass `--parquet-compression`).
-- `config.json`: run configuration snapshot
-
-If you need JSON instead (less efficient, larger memory use), add `--pairwise-format json` and the output will be `evaluation_results/pairwise_clip_compare.json`.
+## Outputs
+- `evaluation_results/pairwise_distances.npz`: flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`.
+- `image_paths.json`: ordered list of image paths corresponding to indices in the flattened array. **Do not share this file if paths are sensitive.**
+- `series_to_indices.json` (optional): only written if `--anonymize-labels` is provided; maps series -> list of indices for downstream mAP without exposing paths.
+- `config.json`: run configuration snapshot.
 
 Progress bars and timestamped logs show progress through discovery, embedding, and distance calculation.
 
-## Output Details and Privacy
-- `file_to_id_map/anon_id_map.json`: Maps absolute file paths to anonymous IDs. **Do not share this file** if you need to keep file names private.
-- `evaluation_results/pairwise_clip_compare.json`: Pairwise distances using only anonymous IDs. **This file alone is sufficient to share results without revealing paths.**
-- `config.json`: Snapshot of the run configuration (paths, model id, etc.).
-
 ## Compute mAP (optional)
-After generating results, you can compute Mean Average Precision from labels and the pairwise distances (use JSON output from the main run via `--pairwise-format json` or convert the Parquet to JSON):
+After generating results, compute Mean Average Precision from the flattened distances and series indices:
 ```bash
 python metrics/map.py \
-  --labels ./labels.json \
-  --pairwise ./results/evaluation_results/pairwise_clip_compare.json \
+  --distances ./results/evaluation_results/pairwise_distances.npz \
+  --series-indices ./results/series_to_indices.json \
   --output_csv ./results/metrics/map.csv
 ```
 
-### Optional: Generate anonymous labels then compute mAP
-1) Convert labeled paths to anon IDs (keeps file names private in the labels JSON):
-```bash
-python label_helpers/labels_to_anon_ids.py \
-  --labels ./resources/labels/images_series_labels.json \
-  --anon-map ./results/file_to_id_map/anon_id_map.json \
-  --output ./results/anon_labels.json
-```
-2) Run mAP using the anon labels and pairwise distances (evaluates retrieval quality on anonymous IDs):
-```bash
-python metrics/map.py \
-  --labels ./results/anon_labels.json \
-  --pairwise ./results/evaluation_results/pairwise_clip_compare.json \
-  --output_csv ./results/map.csv
-```
+If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames.

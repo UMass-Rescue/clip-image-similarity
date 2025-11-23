@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clip-pairwise-eval"
 version = "0.1.0"
-description = "Compute pairwise CLIP image distances with anonymous path mapping."
+description = "Compute flattened pairwise CLIP image distances for retrieval evaluation."
 readme = "README.md"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
     "open_clip_torch",
     "pillow",
     "tqdm",
-    "pyarrow",
+    "numpy",
 ]
 
 [project.scripts]
