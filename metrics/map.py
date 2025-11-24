@@ -11,6 +11,13 @@ from clip_image_similarity.packed_distances import PackedDistances
 
 
 def load_series_indices(path: Path) -> Dict[str, List[int]]:
+    """Load a series->indices mapping from JSON.
+
+    Args:
+        path: Path to JSON file.
+    Returns:
+        Dict mapping series -> list of indices.
+    """
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
@@ -31,7 +38,15 @@ def load_series_indices(path: Path) -> Dict[str, List[int]]:
 def build_rankings(
     dist: PackedDistances, candidates: Set[int], queries: Set[int]
 ) -> Dict[int, List[int]]:
-    """Build neighbor rankings (by index) for each query index."""
+    """Build neighbor rankings (by index) for each query index.
+
+    Args:
+        dist: PackedDistances accessor.
+        candidates: Candidate indices to consider.
+        queries: Query indices to build rankings for.
+    Returns:
+        Dict mapping query -> list of neighbor indices sorted by distance.
+    """
     rankings: Dict[int, List[int]] = {}
     for q in queries:
         neighbors = []
@@ -45,6 +60,7 @@ def build_rankings(
 
 
 def average_precision_at_k(preds: List[int], positives: Set[int], k: int) -> float:
+    """Compute AP@k for a single query."""
     if not positives:
         return 0.0
     denom = min(k, len(positives))
@@ -67,6 +83,7 @@ def mean_average_precision_at_k(
     k: int,
     positives_lookup: Dict[int, Set[int]],
 ) -> float:
+    """Compute mAP@k over a set of queries."""
     values: List[float] = []
     for q in queries:
         ap = average_precision_at_k(preds_by_query[q], positives_lookup[q], k)
@@ -79,7 +96,15 @@ def compute_series_map(
     rankings: Dict[int, List[int]],
     max_k: int,
 ) -> Dict[str, List[float]]:
-    """Compute mAP@k for each series given rankings over candidate set."""
+    """Compute mAP@k for each series given rankings over candidate set.
+
+    Args:
+        series_to_indices: Mapping series -> list of indices in the matrix.
+        rankings: Neighbor rankings for each query index.
+        max_k: Maximum k to evaluate.
+    Returns:
+        Mapping series -> list of mAP values for k=1..max_k.
+    """
     series_map: Dict[str, List[float]] = {}
     for series, imgs in series_to_indices.items():
         images = set(imgs)
@@ -100,6 +125,7 @@ def compute_series_map(
 
 
 def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path) -> None:
+    """Write per-series and mean mAP values to CSV."""
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     max_k = max((len(v) for v in series_to_map.values()), default=0)
     fieldnames = ["series"] + [f"map@{k}" for k in range(1, max_k + 1)]
