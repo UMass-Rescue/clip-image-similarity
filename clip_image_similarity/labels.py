@@ -6,7 +6,7 @@ from typing import Dict, List
 
 
 def map_labels_to_indices(labels_path: Path, image_paths: List[Path]) -> Dict[str, List[int]]:
-    """Convert labels (series -> list of image paths) to indices aligned to image_paths order.
+    """Convert labels (series -> image paths) to indices matching image_paths order.
 
     Args:
         labels_path: Path to labels JSON file (series -> list of image paths).

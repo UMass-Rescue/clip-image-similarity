@@ -9,12 +9,12 @@ import torch
 
 
 def flatten_upper_triangle(dist_matrix: torch.Tensor) -> torch.Tensor:
-    """Flatten the upper triangular part (i<j) of a square distance matrix into a 1D tensor.
+    """Return the upper-triangular distances as a 1D tensor (i < j only).
 
     Args:
         dist_matrix: Square tensor of shape (N, N).
     Returns:
-        1D tensor of length N*(N-1)/2 containing distances in row-major upper-tri order.
+        1D tensor of length N*(N-1)/2 in row-major upper-tri order.
     """
     n = dist_matrix.shape[0]
     if dist_matrix.shape[1] != n:
@@ -24,7 +24,15 @@ def flatten_upper_triangle(dist_matrix: torch.Tensor) -> torch.Tensor:
 
 
 def _infer_n_from_length(length: int) -> int:
-    """Infer matrix size N from flattened length = N*(N-1)/2."""
+    """Infer matrix size N from flattened length = N*(N-1)/2.
+
+    Args:
+        length: Length of the flattened upper-tri array.
+    Returns:
+        Matrix size N such that N*(N-1)/2 == length.
+    Raises:
+        ValueError: If length is non-positive or incompatible.
+    """
     if length <= 0:
         raise ValueError("Flattened length must be positive.")
     n = (1 + math.isqrt(1 + 8 * length)) // 2
@@ -37,6 +45,7 @@ class PackedDistances:
     """Helper for accessing distances stored as a flattened upper-triangle array."""
 
     def __init__(self, flat: np.ndarray):
+        """Initialize with a flattened upper-triangular distance array."""
         self.flat = flat
         self.n = _infer_n_from_length(len(flat))
 
@@ -54,7 +63,16 @@ class PackedDistances:
 
     @classmethod
     def load(cls, path: Path, key: str = "distances") -> PackedDistances:
-        """Load a packed distance array from an .npz file."""
+        """Load a packed distance array from an .npz file.
+
+        Args:
+            path: Path to npz file.
+            key: Key under which the distances are stored.
+        Returns:
+            PackedDistances instance.
+        Raises:
+            KeyError: If the key is missing.
+        """
         data = np.load(path, allow_pickle=False)
         if key not in data:
             raise KeyError(f"Key '{key}' not found in npz file.")
@@ -62,6 +80,12 @@ class PackedDistances:
 
     @staticmethod
     def save(flat: np.ndarray, path: Path, key: str = "distances") -> None:
-        """Save a packed distance array to an .npz file."""
+        """Save a packed distance array to an .npz file.
+
+        Args:
+            flat: Flattened upper-triangular distance array.
+            path: Destination path.
+            key: Key under which to store the array.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, **{key: flat}, allow_pickle=False)
