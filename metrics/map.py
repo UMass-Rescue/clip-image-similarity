@@ -2,223 +2,70 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
+
+import numpy as np
+
+from clip_image_similarity.labels import map_labels_to_indices
+from clip_image_similarity.packed_distances import PackedDistances
 
 
-# ----------------------------
-# I/O helpers
-# ----------------------------
-
-
-def load_labels(labels_path: str) -> Dict[str, Set[str]]:
-    """Load labels JSON (series -> list of image paths).
+def load_series_indices(path: Path) -> Dict[str, List[int]]:
+    """Load a series->indices mapping from JSON.
 
     Args:
-        labels_path: Path to labels JSON file.
+        path: Path to JSON file.
     Returns:
-        Dict mapping series name to a set of image paths.
-    Raises:
-        ValueError: If the structure or element types are invalid.
+        Dict mapping series -> list of indices.
     """
-    with open(labels_path, "r") as f:
+    with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    # Expecting a dict: series_name -> list of image paths
-    series_to_images: Dict[str, Set[str]] = {}
-    for series, paths in data.items():
-        if not isinstance(paths, list):
-            raise ValueError(f"Labels for series '{series}' must be a list of paths.")
-        normalized: Set[str] = set()
-        for idx, path in enumerate(paths):
-            if not isinstance(path, str):
-                raise ValueError(
-                    f"Labels for series '{series}' must be strings; "
-                    f"found {type(path).__name__} at index {idx}."
-                )
-            normalized.add(path)
-        series_to_images[series] = normalized
-    return series_to_images
-
-
-def load_pairwise(pairwise_path: str) -> List[dict]:
-    """Load pairwise distance results.
-
-    Args:
-        pairwise_path: JSON file with list of {image1, image2, distance}.
-    Returns:
-        List of dicts with validated keys and numeric distance.
-    Raises:
-        ValueError: If structure or required keys/types are invalid.
-    """
-    with open(pairwise_path, "r") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError("Pairwise results must be a JSON list.")
-    normalized_entries: List[dict] = []
-    for idx, item in enumerate(data):
-        if not isinstance(item, dict):
-            raise ValueError(f"Pairwise entry at index {idx} must be a JSON object.")
-        if "image1" not in item or "image2" not in item:
-            raise ValueError(
-                f"Pairwise entry at index {idx} must have 'image1' and 'image2'."
-            )
-        a = item.get("image1")
-        b = item.get("image2")
-        if not isinstance(a, str) or not isinstance(b, str):
-            raise ValueError(
-                f"Pairwise entry at index {idx} must have 'image1' and 'image2' as strings."
-            )
-        if "distance" not in item:
-            raise ValueError(f"Pairwise entry at index {idx} missing 'distance'.")
-        d = extract_distance(item.get("distance"))
-        normalized_entries.append({"image1": a, "image2": b, "distance": d})
-    return normalized_entries
-
-
-# ----------------------------
-# Validation
-# ----------------------------
-
-
-def collect_pairwise_paths(
-    entries: List[dict],
-) -> Set[str]:
-    """
-    Collect image paths present in pairwise entries.
-
-    Args:
-        entries: Validated pairwise entries.
-    Returns:
-        Set of all unique image identifiers seen in image1/image2.
-    """
-    found: Set[str] = set()
-    for item in entries:
-        found.add(item["image1"])
-        found.add(item["image2"])
-    return found
-
-
-def validate_inputs(
-    series_to_images: Dict[str, Set[str]],
-    pairwise_entries: List[dict],
-) -> None:
-    """
-    Ensure all labeled images are present in the pairwise results.
-
-    Args:
-        series_to_images: Mapping of series to labeled image paths.
-        pairwise_entries: Pairwise distance entries.
-    Raises:
-        ValueError: If any labeled image is missing from pairwise results.
-    """
-    pairwise_paths = collect_pairwise_paths(pairwise_entries)
-
-    missing: List[str] = []
-    for series, images in series_to_images.items():
-        for p in images:
-            if p not in pairwise_paths:
-                missing.append(p)
-    if missing:
-        missing_preview = "\n  ".join(missing[:20])
-        more = "" if len(missing) <= 20 else f"\n  ... and {len(missing) - 20} more"
-        raise ValueError(
-            "Validation failed: the following labeled images are not present in the pairwise results:\n  "
-            f"{missing_preview}{more}"
-        )
-
-
-# ----------------------------
-# Distance handling and rankings
-# ----------------------------
-
-
-def extract_distance(value) -> float:
-    """Normalize distance input to a float.
-
-    Args:
-        value: Numeric distance or dict containing a numeric 'distance' field.
-    Returns:
-        Distance as float.
-    Raises:
-        ValueError: If the value cannot be interpreted as a distance.
-    """
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, dict):
-        if isinstance(value["distance"], (int, float)):
-            return float(value["distance"])
-    raise ValueError(f"Unsupported distance format: {value!r}")
+    if not isinstance(data, dict):
+        raise ValueError("series_indices must be a JSON object of {series: [indices]}.")
+    result: Dict[str, List[int]] = {}
+    for series, idx_list in data.items():
+        if not isinstance(series, str):
+            raise ValueError("Series names must be strings.")
+        if not isinstance(idx_list, list):
+            raise ValueError(f"Indices for series '{series}' must be a list.")
+        for idx in idx_list:
+            if not isinstance(idx, int):
+                raise ValueError(f"Indices for series '{series}' must be integers.")
+        result[series] = idx_list
+    return result
 
 
 def build_rankings(
-    entries: List[dict],
-) -> Dict[str, List[Tuple[str, float]]]:
-    """
-    Build a neighbor ranking for each image:
-    - For each pair (a, b, d), add (b, d) to a's list and (a, d) to b's list.
-    - If duplicate pairs occur, keep the smallest distance.
-    - Sort neighbor lists by ascending distance.
+    dist: PackedDistances, candidates: Set[int], queries: Set[int]
+) -> Dict[int, List[int]]:
+    """Build neighbor rankings (by index) for each query index.
 
     Args:
-        entries: Pairwise distance entries.
+        dist: PackedDistances accessor.
+        candidates: Candidate indices to consider.
+        queries: Query indices to build rankings for.
     Returns:
-        Dict mapping image -> list of (neighbor, distance) sorted ascending.
+        Dict mapping query -> list of neighbor indices sorted by distance.
     """
-    neighbors: Dict[str, Dict[str, float]] = {}
-
-    for item in entries:
-        a_raw = item["image1"]
-        b_raw = item["image2"]
-        d = item["distance"]
-        a = a_raw
-        b = b_raw
-
-        if a == b:
-            continue
-        if a not in neighbors:
-            neighbors[a] = {}
-        if b not in neighbors:
-            neighbors[b] = {}
-
-        # Keep the minimum distance if duplicates appear
-        if b not in neighbors[a] or d < neighbors[a][b]:
-            neighbors[a][b] = d
-        if a not in neighbors[b] or d < neighbors[b][a]:
-            neighbors[b][a] = d
-
-    # Convert to sorted lists
-    rankings: Dict[str, List[Tuple[str, float]]] = {}
-    for img, nbrs in neighbors.items():
-        rankings[img] = sorted(nbrs.items(), key=lambda kv: kv[1])
+    rankings: Dict[int, List[int]] = {}
+    for q in queries:
+        neighbors = []
+        for j in candidates:
+            if j == q:
+                continue
+            neighbors.append((j, dist.distance(q, j)))
+        neighbors.sort(key=lambda kv: kv[1])
+        rankings[q] = [idx for idx, _ in neighbors]
     return rankings
 
 
-# ----------------------------
-# AP / mAP computation
-# ----------------------------
-
-
-def average_precision_at_k(preds: List[str], positives: Set[str], k: int) -> float:
-    """
-    Compute AP@k for a single query.
-    - Denominator = min(k, len(positives))
-    - Sum precision at each rank where a positive is found, divided by denominator.
-
-    Args:
-        preds: Ranked list of predicted neighbor ids.
-        positives: Set of ground truth positives for the query.
-        k: Cutoff rank.
-    Returns:
-        Average precision at k.
-    """
+def average_precision_at_k(preds: List[int], positives: Set[int], k: int) -> float:
+    """Compute AP@k for a single query."""
     if not positives:
         return 0.0
     denom = min(k, len(positives))
-    if denom == 0:
-        return 0.0
-
     hits = 0
     sum_precisions = 0.0
-    # Iterate over predictions until we see denom positives or exhaust preds
     for idx, p in enumerate(preds, start=1):
         if p in positives:
             hits += 1
@@ -226,151 +73,129 @@ def average_precision_at_k(preds: List[str], positives: Set[str], k: int) -> flo
             if hits == denom:
                 break
         if idx == k:
-            # We only care about top-k ranks; continue if k < denom (won't happen since denom<=k)
             break
     return sum_precisions / denom
 
 
 def mean_average_precision_at_k(
-    preds_by_image: Dict[str, List[str]],
-    images: Set[str],
+    preds_by_query: Dict[int, List[int]],
+    queries: Set[int],
     k: int,
+    positives_lookup: Dict[int, Set[int]],
 ) -> float:
-    """
-    Compute mAP@k over a set of query images, given per-image ranked predictions.
-
-    Args:
-        preds_by_image: Mapping of query image -> ranked neighbor list.
-        images: Set of images to evaluate.
-        k: Cutoff rank.
-    Returns:
-        Mean average precision at k across all queries.
-    """
-    if not images:
-        raise ValueError("Cannot compute mAP@k for an empty set of images.")
-
-    ap_values: List[float] = []
-    for query in images:
-        positives = set(images)
-        positives.discard(query)
-        preds = preds_by_image[query]
-        ap = average_precision_at_k(preds, positives, k)
-        ap_values.append(ap)
-    return sum(ap_values) / len(ap_values)
+    """Compute mAP@k over a set of queries."""
+    values: List[float] = []
+    for q in queries:
+        ap = average_precision_at_k(preds_by_query[q], positives_lookup[q], k)
+        values.append(ap)
+    return sum(values) / len(values) if values else 0.0
 
 
 def compute_series_map(
-    series_to_images: Dict[str, Set[str]],
-    rankings: Dict[str, List[Tuple[str, float]]],
+    series_to_indices: Dict[str, List[int]],
+    rankings: Dict[int, List[int]],
     max_k: int,
 ) -> Dict[str, List[float]]:
-    """
-    For each series, compute mAP@k for k=1..max_k.
-    For series with size s, AP uses denom=min(k, s-1) per query.
+    """Compute mAP@k for each series given rankings over candidate set.
 
     Args:
-        series_to_images: Mapping of series -> set of images.
-        rankings: Neighbor rankings for each image.
+        series_to_indices: Mapping series -> list of indices in the matrix.
+        rankings: Neighbor rankings for each query index.
         max_k: Maximum k to evaluate.
     Returns:
-        Mapping of series -> list of mAP values for k=1..max_k.
+        Mapping series -> list of mAP values for k=1..max_k.
     """
-    series_to_map: Dict[str, List[float]] = {}
-    for series, images in series_to_images.items():
-        s = len(images)
-        if s == 0:
-            raise ValueError(f"Series '{series}' has no images.")
-        if s <= 1:
-            raise ValueError(f"Series '{series}' has only one image.")
-        # Pre-compute predictions per image (neighbor order only)
-        preds_by_image: Dict[str, List[str]] = {}
-        for img in images:
-            ranked = rankings[img]
-            preds_by_image[img] = [nbr for (nbr, _) in ranked if nbr != img]
+    series_map: Dict[str, List[float]] = {}
+    for series, imgs in series_to_indices.items():
+        images = set(imgs)
+        if len(images) <= 1:
+            raise ValueError(f"Series '{series}' must have at least two images.")
+        positives_lookup: Dict[int, Set[int]] = {}
+        for q in images:
+            pos = set(images)
+            pos.discard(q)
+            positives_lookup[q] = pos
 
         ap_by_k: List[float] = []
         for k in range(1, max_k + 1):
-            series_map_k = mean_average_precision_at_k(preds_by_image, images, k)
-            ap_by_k.append(series_map_k)
-        series_to_map[series] = ap_by_k
-    return series_to_map
+            map_k = mean_average_precision_at_k(rankings, images, k, positives_lookup)
+            ap_by_k.append(map_k)
+        series_map[series] = ap_by_k
+    return series_map
 
 
-# ----------------------------
-# Output
-# ----------------------------
-
-
-def write_series_map_csv(
-    series_to_map: Dict[str, List[float]], output_csv: str
-) -> None:
-    """Write per-series and mean mAP values to CSV.
-
-    Args:
-        series_to_map: Mapping of series -> list of mAP values.
-        output_csv: Destination CSV path.
-    """
-    out_path = Path(output_csv)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    # Determine header size (max k)
+def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path) -> None:
+    """Write per-series and mean mAP values to CSV."""
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
     max_k = max((len(v) for v in series_to_map.values()), default=0)
     fieldnames = ["series"] + [f"map@{k}" for k in range(1, max_k + 1)]
-    with open(out_path, "w", newline="") as f:
+    with output_csv.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        # Write per-series rows and accumulate for averages
         sums = [0.0 for _ in range(max_k)]
         counts = [0 for _ in range(max_k)]
         for series, values in series_to_map.items():
             row = {"series": series}
             for i, v in enumerate(values, start=1):
                 row[f"map@{i}"] = f"{v:.6f}"
-                if i - 1 < max_k:
-                    sums[i - 1] += v
-                    counts[i - 1] += 1
+                sums[i - 1] += v
+                counts[i - 1] += 1
             writer.writerow(row)
-        # Append average row
-        if max_k > 0 and any(c > 0 for c in counts):
+        if max_k > 0:
             avg_row = {"series": "mean"}
             for i in range(max_k):
-                avg = (sums[i] / counts[i]) if counts[i] > 0 else 0.0
+                avg = (sums[i] / counts[i]) if counts[i] else 0.0
                 avg_row[f"map@{i+1}"] = f"{avg:.6f}"
             writer.writerow(avg_row)
 
 
-# ----------------------------
-# Main
-# ----------------------------
-
-
-def main():
-    """CLI entry point to compute mAP@k from labels and pairwise distances."""
-    parser = argparse.ArgumentParser(
-        description="Compute mAP@k from pairwise image distances and series labels."
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Compute mAP@k from flattened pairwise distances and labels.")
+    parser.add_argument("--distances", required=True, help="Path to npz file containing flattened distances.")
+    parser.add_argument(
+        "--series-indices",
+        help="Optional path to JSON mapping series -> list of indices (preferred for privacy).",
     )
     parser.add_argument(
         "--labels",
-        required=True,
-        help="Path to labels JSON (series -> list of image paths).",
+        help="Labels JSON (series -> list of image paths). Required if --series-indices not provided.",
     )
     parser.add_argument(
-        "--pairwise",
-        required=True,
-        help="Path to pairwise results JSON from pairwise_test.py.",
+        "--image-paths",
+        help="Path to image_paths.json produced during embedding run. Required if --labels is used.",
     )
     parser.add_argument("--output_csv", required=True, help="Output CSV path.")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--labeled-images-only",
+        action="store_true",
+        help="Restrict candidates to labeled images only when building rankings.",
+    )
+    return parser.parse_args()
 
-    series_to_images = load_labels(args.labels)
-    entries = load_pairwise(args.pairwise)
-    validate_inputs(series_to_images, entries)
 
-    # Build rankings and compute mAP
-    rankings = build_rankings(entries)
-    max_k = max(len(v) for v in series_to_images.values())
-    series_to_map = compute_series_map(series_to_images, rankings, max_k)
+def main() -> None:
+    args = parse_args()
+    dist_path = Path(args.distances).resolve()
+    packed = PackedDistances.load(dist_path)
 
-    write_series_map_csv(series_to_map, args.output_csv)
+    if args.series_indices:
+        series_to_indices = load_series_indices(Path(args.series_indices).resolve())
+    else:
+        if not args.labels or not args.image_paths:
+            raise ValueError("Provide either --series-indices or both --labels and --image-paths.")
+        image_paths = json.loads(Path(args.image_paths).read_text())
+        img_paths = [Path(p) for p in image_paths]
+        series_to_indices = map_labels_to_indices(Path(args.labels).resolve(), img_paths)
+
+    labeled_union: Set[int] = set()
+    for vals in series_to_indices.values():
+        labeled_union.update(vals)
+
+    candidates = labeled_union if args.labeled_images_only else set(range(packed.n))
+    rankings = build_rankings(packed, candidates, labeled_union)
+    max_k = max(len(v) for v in series_to_indices.values())
+    series_map = compute_series_map(series_to_indices, rankings, max_k)
+    write_series_map_csv(series_map, Path(args.output_csv).resolve())
 
 
 if __name__ == "__main__":

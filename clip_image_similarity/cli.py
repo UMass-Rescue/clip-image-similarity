@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+import torch
+
 from .config import RunConfig
 from .embeddings import compute_image_embeddings
-from .path_id_store import build_id_map_for_paths, create_path_id_store
 from .serialization import save_config, save_json
-from .similarity import compute_similarity_and_distances
+from .similarity import SimilarityComputer
+from .packed_distances import flatten_upper_triangle
+from .labels import map_labels_to_indices
 from .utils import DEFAULT_EXTS, configure_logging, default_device, find_images, log, plural
 
 
@@ -33,6 +37,17 @@ def parse_args_to_config() -> RunConfig:
         default=",".join(DEFAULT_EXTS),
         help="Comma-separated list of image extensions to include (defaults to common formats).",
     )
+    parser.add_argument(
+        "--pairwise-dtype",
+        choices=["float32", "float16"],
+        default="float32",
+        help="Numeric precision used when storing pairwise distances (default: float32).",
+    )
+    parser.add_argument(
+        "--anonymize-labels",
+        default=None,
+        help="Optional labels JSON (series -> list of image paths); will be converted to series -> list of indices.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output files.")
 
     args = parser.parse_args()
@@ -48,6 +63,8 @@ def parse_args_to_config() -> RunConfig:
 
     device = args.device or default_device()
 
+    labels_path = Path(args.anonymize_labels).resolve() if args.anonymize_labels else None
+
     return RunConfig(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -55,6 +72,8 @@ def parse_args_to_config() -> RunConfig:
         batch_size=args.batch_size,
         device=device,
         image_exts=image_exts,
+        pairwise_dtype=args.pairwise_dtype,
+        labels_path=labels_path,
         overwrite=args.overwrite,
     )
 
@@ -81,12 +100,6 @@ def run(config: RunConfig) -> None:
         raise RuntimeError(f"No images found in {config.input_dir} with extensions {config.image_exts}")
     log(f"Found {plural(len(image_paths), 'image')} to process.")
 
-    log("Assigning anonymous IDs to image paths...")
-    id_store = create_path_id_store(config.output_dir)
-    id_map = build_id_map_for_paths(id_store, image_paths)
-    id_store.save()
-    log("Anonymous ID map saved.")
-
     embeddings = compute_image_embeddings(
         image_paths=image_paths,
         model_id=config.model_id,
@@ -94,18 +107,35 @@ def run(config: RunConfig) -> None:
         batch_size=config.batch_size,
     )
 
-    results = compute_similarity_and_distances(
-        embeddings=embeddings,
-        device=config.device,
-        image_paths=image_paths,
-        id_map=id_map,
-    )
+    computer = SimilarityComputer(device=config.device)
+    sim = computer.cosine_similarity_matrix(embeddings, dtype=torch.float32)
+    dist = computer.similarity_to_distance(sim)
+    if config.pairwise_dtype == "float16":
+        dist = dist.to(torch.float16)
 
-    pairwise_path = config.output_dir / "evaluation_results" / "pairwise_clip_compare.json"
+    eval_dir = config.output_dir / "evaluation_results"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    pairwise_path = eval_dir / "pairwise_distances.npz"
     if pairwise_path.exists() and not config.overwrite:
         raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
+    log(f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype}).")
+    flat_np = flatten_upper_triangle(dist).cpu().numpy()
+    np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
+    flat_np = flat_np.astype(np_dtype, copy=False)
 
-    save_json(results, pairwise_path)
+    np.savez_compressed(pairwise_path, distances=flat_np, dtype=config.pairwise_dtype)
+
+    paths_json = config.output_dir / "image_paths.json"
+    save_json([p.as_posix() for p in image_paths], paths_json)
+    log(f"Saved image path ordering to {paths_json} (do not share if paths are sensitive).")
+
+    if config.labels_path:
+        log("Mapping provided labels to indices...")
+        series_indices = map_labels_to_indices(config.labels_path, image_paths)
+        series_out = config.output_dir / "series_to_indices.json"
+        save_json(series_indices, series_out)
+        log(f"Saved series->indices to {series_out} for downstream mAP.")
+
     save_config(config, config.output_dir)
 
     log("Run complete.")
