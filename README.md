@@ -52,12 +52,12 @@ Progress bars and timestamped logs show progress through discovery, embedding, a
 ## Compute mAP (optional)
 After generating results, compute Mean Average Precision from the flattened distances and series indices:
 ```bash
-python metrics/map.py \
+python -m metrics.map \
   --distances ./results/evaluation_results/pairwise_distances.npz \
   --series-indices ./results/series_to_indices.json \
   --output_csv ./results/metrics/map.csv
 # OR
-python metrics/map.py --distances ./results_3/evaluation_results/pairwise_distances.npz --series-indices ./results_3/series_to_indices.json --output_csv ./results_3/metrics/map.csv
+python -m metrics.map --distances ./results_3/evaluation_results/pairwise_distances.npz --series-indices ./results_3/series_to_indices.json --output_csv ./results_3/metrics/map.csv
 ```
 
 If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames.
