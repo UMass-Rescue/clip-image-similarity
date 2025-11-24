@@ -25,6 +25,7 @@ make run \
   DEVICE=cuda \
   OVERWRITE=1
 ```
+make run INPUT_DIR=./resources/images OUTPUT_DIR=./results MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384  BATCH_SIZE=16
 
 Option 2: Create venv with Makefile, then run Python manually
 ```bash
@@ -36,6 +37,8 @@ python -m clip_image_similarity.cli \
   --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
   --batch-size 16 \
   --device cuda
+# OR
+python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results_3 --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 --batch-size 16 
 ```
 
 ## Outputs
@@ -53,6 +56,8 @@ python metrics/map.py \
   --distances ./results/evaluation_results/pairwise_distances.npz \
   --series-indices ./results/series_to_indices.json \
   --output_csv ./results/metrics/map.csv
+# OR
+python metrics/map.py --distances ./results_3/evaluation_results/pairwise_distances.npz --series-indices ./results_3/series_to_indices.json --output_csv ./results_3/metrics/map.csv
 ```
 
 If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames.
