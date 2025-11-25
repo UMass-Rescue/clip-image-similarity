@@ -18,6 +18,10 @@ def extract_topk_neighbors(
         dtype: Target dtype for stored distances ("float32" or "float16").
     Returns:
         Tuple (indices, distances) each shaped (N, top_k) as numpy arrays.
+    Side Effects:
+        Distance matrix is modified in place.
+    Raises:
+        ValueError: If distance matrix is not square or top_k is not positive and less than number of images.
     """
     n = dist_matrix.shape[0]
     if dist_matrix.shape[1] != n:
