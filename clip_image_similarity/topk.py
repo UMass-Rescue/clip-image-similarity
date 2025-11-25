@@ -33,7 +33,7 @@ def extract_topk_neighbors(
 
     # Move to CPU numpy
     idx_np = idxs.cpu().numpy()
-    index_dtype = np.uint16 if n <= np.iinfo(np.uint16).max else np.uint32
+    index_dtype = np.uint16 if n <= np.iinfo(np.uint16).max + 1 else np.uint32
     indices_np = idx_np.astype(index_dtype, copy=False)
     dist_np = vals.cpu().numpy()
     if dtype == "float16":
