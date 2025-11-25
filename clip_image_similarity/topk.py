@@ -82,7 +82,19 @@ class TopKNeighbors:
         return cls(data["indices"], data["distances"])
 
     def neighbors(self, idx: int) -> List[Tuple[int, float]]:
-        """Return the top-k neighbors for the given index as (neighbor_idx, distance) tuples."""
+        """Return the top-k neighbors for the given index as (neighbor_idx, distance) tuples.
+
+        Args:
+            idx: Index of the query item (must be in range [0, n)).
+        Returns:
+            List of (neighbor_idx, distance) tuples, sorted by distance.
+        Raises:
+            ValueError: If idx is out of bounds.
+        """
+        if idx < 0 or idx >= self.n:
+            raise ValueError(
+                f"Index {idx} is out of bounds (valid range: 0 <= idx < {self.n})."
+            )
         row_idx = self.indices[idx].tolist()
         row_dist = self.distances[idx].tolist()
         return list(zip(row_idx, row_dist))
