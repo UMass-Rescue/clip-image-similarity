@@ -46,6 +46,7 @@ class RunConfig:
     device: str
     image_exts: Tuple[str, ...]
     pairwise_dtype: str = "float32"  # float32|float16 for storage
+    top_k: Optional[int] = None  # optional top-k sparse output
     labels_path: Optional[Path] = None  # optional labels to map to indices
     overwrite: bool = False
 
@@ -57,6 +58,8 @@ class RunConfig:
         self.pairwise_dtype = self.pairwise_dtype.lower()
         if self.pairwise_dtype not in {"float32", "float16"}:
             raise ValueError("pairwise_dtype must be 'float32' or 'float16'")
+        if self.top_k is not None and self.top_k <= 0:
+            raise ValueError("top_k must be positive if provided")
         if self.labels_path:
             self.labels_path = self.labels_path.resolve()
 

@@ -11,6 +11,7 @@ from .embeddings import compute_image_embeddings
 from .serialization import save_config, save_json
 from .similarity import SimilarityComputer
 from .packed_distances import flatten_upper_triangle
+from .topk import extract_topk_neighbors, save_topk_neighbors
 from .labels import map_labels_to_indices
 from .utils import DEFAULT_EXTS, configure_logging, default_device, find_images, log, plural
 
@@ -44,6 +45,12 @@ def parse_args_to_config() -> RunConfig:
         help="Numeric precision used when storing pairwise distances (default: float32).",
     )
     parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Optional top-k neighbors to store per image instead of full flattened distances.",
+    )
+    parser.add_argument(
         "--anonymize-labels",
         default=None,
         help="Optional labels JSON (series -> list of image paths); will be converted to series -> list of indices.",
@@ -73,6 +80,7 @@ def parse_args_to_config() -> RunConfig:
         device=device,
         image_exts=image_exts,
         pairwise_dtype=args.pairwise_dtype,
+        top_k=args.top_k,
         labels_path=labels_path,
         overwrite=args.overwrite,
     )
@@ -115,15 +123,23 @@ def run(config: RunConfig) -> None:
 
     eval_dir = config.output_dir / "evaluation_results"
     eval_dir.mkdir(parents=True, exist_ok=True)
-    pairwise_path = eval_dir / "pairwise_distances.npz"
-    if pairwise_path.exists() and not config.overwrite:
-        raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
-    log(f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype}).")
-    flat_np = flatten_upper_triangle(dist).cpu().numpy()
-    np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
-    flat_np = flat_np.astype(np_dtype, copy=False)
 
-    np.savez_compressed(pairwise_path, distances=flat_np, dtype=config.pairwise_dtype)
+    if config.top_k:
+        pairwise_path = eval_dir / "pairwise_topk.npz"
+        if pairwise_path.exists() and not config.overwrite:
+            raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
+        log(f"Extracting top-{config.top_k} neighbors per image and saving to {pairwise_path}.")
+        indices, distances = extract_topk_neighbors(dist, top_k=config.top_k, dtype=config.pairwise_dtype)
+        save_topk_neighbors(pairwise_path, indices=indices, distances=distances, dtype=config.pairwise_dtype)
+    else:
+        pairwise_path = eval_dir / "pairwise_distances.npz"
+        if pairwise_path.exists() and not config.overwrite:
+            raise FileExistsError(f"{pairwise_path} already exists. Use --overwrite to replace it.")
+        log(f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype}).")
+        flat_np = flatten_upper_triangle(dist).cpu().numpy()
+        np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
+        flat_np = flat_np.astype(np_dtype, copy=False)
+        np.savez_compressed(pairwise_path, distances=flat_np, dtype=config.pairwise_dtype)
 
     paths_json = config.output_dir / "image_paths.json"
     save_json([p.as_posix() for p in image_paths], paths_json)

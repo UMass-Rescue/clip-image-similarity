@@ -8,6 +8,7 @@ import numpy as np
 
 from clip_image_similarity.labels import map_labels_to_indices
 from clip_image_similarity.packed_distances import PackedDistances
+from clip_image_similarity.topk import TopKNeighbors  # placeholder for top-k format
 
 
 def load_series_indices(path: Path) -> Dict[str, List[int]]:
@@ -151,7 +152,16 @@ def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compute mAP@k from flattened pairwise distances and labels.")
-    parser.add_argument("--distances", required=True, help="Path to npz file containing flattened distances.")
+    parser.add_argument(
+        "--distances",
+        required=False,
+        help="Path to npz file containing flattened distances (upper-tri). Required unless --topk is provided.",
+    )
+    parser.add_argument(
+        "--topk",
+        required=False,
+        help="Path to npz file containing top-k neighbors (indices/distances). Required unless --distances is provided.",
+    )
     parser.add_argument(
         "--series-indices",
         help="Optional path to JSON mapping series -> list of indices (preferred for privacy).",
@@ -175,8 +185,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dist_path = Path(args.distances).resolve()
-    packed = PackedDistances.load(dist_path)
+    if args.distances:
+        dist_path = Path(args.distances).resolve()
+        packed = PackedDistances.load(dist_path)
+        neighbor_source = packed
+    elif args.topk:
+        # Placeholder: load top-k structure when implemented
+        neighbor_source = TopKNeighbors.load(Path(args.topk).resolve())
+    else:
+        raise ValueError("Provide either --distances or --topk.")
 
     if args.series_indices:
         series_to_indices = load_series_indices(Path(args.series_indices).resolve())
