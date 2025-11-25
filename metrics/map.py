@@ -8,7 +8,7 @@ import numpy as np
 
 from clip_image_similarity.labels import map_labels_to_indices
 from clip_image_similarity.packed_distances import PackedDistances
-from clip_image_similarity.topk import TopKNeighbors  # placeholder for top-k format
+from clip_image_similarity.topk import TopKNeighbors
 
 
 def load_series_indices(path: Path) -> Dict[str, List[int]]:
@@ -37,12 +37,12 @@ def load_series_indices(path: Path) -> Dict[str, List[int]]:
 
 
 def build_rankings(
-    dist: PackedDistances, candidates: Set[int], queries: Set[int]
+    dist: PackedDistances | TopKNeighbors, candidates: Set[int], queries: Set[int]
 ) -> Dict[int, List[int]]:
     """Build neighbor rankings (by index) for each query index.
 
     Args:
-        dist: PackedDistances accessor.
+        dist: PackedDistances or TopKNeighbors accessor.
         candidates: Candidate indices to consider.
         queries: Query indices to build rankings for.
     Returns:
@@ -50,12 +50,11 @@ def build_rankings(
     """
     rankings: Dict[int, List[int]] = {}
     for q in queries:
-        neighbors = []
-        for j in candidates:
-            if j == q:
-                continue
-            neighbors.append((j, dist.distance(q, j)))
-        neighbors.sort(key=lambda kv: kv[1])
+        if isinstance(dist, TopKNeighbors):
+            neighbors = [(j, d) for j, d in dist.neighbors(q) if j in candidates and j != q]
+        else:
+            neighbors = [(j, dist.distance(q, j)) for j in candidates if j != q]
+            neighbors.sort(key=lambda kv: kv[1])
         rankings[q] = [idx for idx, _ in neighbors]
     return rankings
 
@@ -187,10 +186,8 @@ def main() -> None:
     args = parse_args()
     if args.distances:
         dist_path = Path(args.distances).resolve()
-        packed = PackedDistances.load(dist_path)
-        neighbor_source = packed
+        neighbor_source = PackedDistances.load(dist_path)
     elif args.topk:
-        # Placeholder: load top-k structure when implemented
         neighbor_source = TopKNeighbors.load(Path(args.topk).resolve())
     else:
         raise ValueError("Provide either --distances or --topk.")
@@ -208,8 +205,8 @@ def main() -> None:
     for vals in series_to_indices.values():
         labeled_union.update(vals)
 
-    candidates = labeled_union if args.labeled_images_only else set(range(packed.n))
-    rankings = build_rankings(packed, candidates, labeled_union)
+    candidates = labeled_union if args.labeled_images_only else set(range(neighbor_source.n))
+    rankings = build_rankings(neighbor_source, candidates, labeled_union)
     max_k = max(len(v) for v in series_to_indices.values())
     series_map = compute_series_map(series_to_indices, rankings, max_k)
     write_series_map_csv(series_map, Path(args.output_csv).resolve())
