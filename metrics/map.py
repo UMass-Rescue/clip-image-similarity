@@ -190,7 +190,7 @@ def main() -> None:
     elif args.topk:
         neighbor_source = TopKNeighbors.load(Path(args.topk).resolve())
     else:
-        raise ValueError("Provide either --distances or --topk.")
+        raise ValueError("Exactly one of --distances or --topk must be provided.")
 
     if args.series_indices:
         series_to_indices = load_series_indices(Path(args.series_indices).resolve())
