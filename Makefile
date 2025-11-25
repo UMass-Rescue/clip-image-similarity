@@ -22,4 +22,5 @@ run: install
 		--model $(MODEL) \
 		$(if $(BATCH_SIZE),--batch-size $(BATCH_SIZE),) \
 		$(if $(DEVICE),--device $(DEVICE),) \
+		$(if $(TOP_K),--top-k $(TOP_K),) \
 		$(if $(OVERWRITE),--overwrite,)
