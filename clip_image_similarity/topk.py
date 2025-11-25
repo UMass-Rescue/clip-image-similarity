@@ -104,20 +104,18 @@ class TopKNeighbors:
 
         Args:
             i: Index of the query item (must be in range [0, n)).
-            j: Index of the neighbor to check (must be in range [0, n)).
+            j: Index of the neighbor to check (must be non-negative).
         Returns:
             Distance from i to j if j is in i's stored neighbors, else None.
         Raises:
-            ValueError: If i or j is out of bounds.
+            ValueError: If i is out of bounds or j is negative.
         """
         if i < 0 or i >= self.n:
             raise ValueError(
                 f"Index i={i} is out of bounds (valid range: 0 <= i < {self.n})."
             )
-        if j < 0 or j >= self.n:
-            raise ValueError(
-                f"Index j={j} is out of bounds (valid range: 0 <= j < {self.n})."
-            )
+        if j < 0:
+            raise ValueError(f"Index j={j} must be non-negative.")
         row = self.indices[i]
         pos = np.where(row == j)[0]
         if pos.size == 0:
