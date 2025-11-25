@@ -51,6 +51,10 @@ def build_rankings(
     rankings: Dict[int, List[int]] = {}
     for q in queries:
         if isinstance(dist, TopKNeighbors):
+            if not (0 <= q < dist.n):
+                raise ValueError(
+                    f"Query index {q} is out of bounds for TopKNeighbors (valid range: 0 to {dist.n - 1})."
+                )
             neighbors = [(j, d) for j, d in dist.neighbors(q) if j in candidates and j != q]
         else:
             neighbors = [(j, dist.distance(q, j)) for j in candidates if j != q]
