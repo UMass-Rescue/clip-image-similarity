@@ -55,7 +55,9 @@ def build_rankings(
                 raise ValueError(
                     f"Query index {q} is out of bounds for TopKNeighbors (valid range: 0 to {dist.n - 1})."
                 )
-            neighbors = [(j, d) for j, d in dist.neighbors(q) if j in candidates and j != q]
+            neighbors = [
+                (j, d) for j, d in dist.neighbors(q) if j in candidates and j != q
+            ]
         else:
             neighbors = [(j, dist.distance(q, j)) for j in candidates if j != q]
             neighbors.sort(key=lambda kv: kv[1])
@@ -128,7 +130,9 @@ def compute_series_map(
     return series_map
 
 
-def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path) -> None:
+def write_series_map_csv(
+    series_to_map: Dict[str, List[float]], output_csv: Path
+) -> None:
     """Write per-series and mean mAP values to CSV."""
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     max_k = max((len(v) for v in series_to_map.values()), default=0)
@@ -154,7 +158,9 @@ def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compute mAP@k from flattened pairwise distances and labels.")
+    parser = argparse.ArgumentParser(
+        description="Compute mAP@k from flattened pairwise distances and labels."
+    )
     parser.add_argument(
         "--distances",
         required=False,
@@ -200,16 +206,22 @@ def main() -> None:
         series_to_indices = load_series_indices(Path(args.series_indices).resolve())
     else:
         if not args.labels or not args.image_paths:
-            raise ValueError("Provide either --series-indices or both --labels and --image-paths.")
+            raise ValueError(
+                "Provide either --series-indices or both --labels and --image-paths."
+            )
         image_paths = json.loads(Path(args.image_paths).read_text())
         img_paths = [Path(p) for p in image_paths]
-        series_to_indices = map_labels_to_indices(Path(args.labels).resolve(), img_paths)
+        series_to_indices = map_labels_to_indices(
+            Path(args.labels).resolve(), img_paths
+        )
 
     labeled_union: Set[int] = set()
     for vals in series_to_indices.values():
         labeled_union.update(vals)
 
-    candidates = labeled_union if args.labeled_images_only else set(range(neighbor_source.n))
+    candidates = (
+        labeled_union if args.labeled_images_only else set(range(neighbor_source.n))
+    )
     rankings = build_rankings(neighbor_source, candidates, labeled_union)
     max_k = max(len(v) for v in series_to_indices.values())
     series_map = compute_series_map(series_to_indices, rankings, max_k)

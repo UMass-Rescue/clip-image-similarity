@@ -14,7 +14,9 @@ def _validate_input_dir(path: Path) -> Path:
         ValueError: If the path does not exist or is not a directory.
     """
     if not path.is_dir():
-        raise ValueError(f"Input directory does not exist or is not a directory: {path}")
+        raise ValueError(
+            f"Input directory does not exist or is not a directory: {path}"
+        )
     return path
 
 

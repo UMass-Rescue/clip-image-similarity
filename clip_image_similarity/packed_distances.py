@@ -37,7 +37,9 @@ def _infer_n_from_length(length: int) -> int:
         raise ValueError("Flattened length must be positive.")
     n = (1 + math.isqrt(1 + 8 * length)) // 2
     if n * (n - 1) // 2 != length:
-        raise ValueError("Flattened length is not compatible with an upper-triangular matrix.")
+        raise ValueError(
+            "Flattened length is not compatible with an upper-triangular matrix."
+        )
     return int(n)
 
 

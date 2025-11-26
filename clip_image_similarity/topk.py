@@ -47,7 +47,9 @@ def extract_topk_neighbors(
     return indices_np, dist_np
 
 
-def save_topk_neighbors(path: Path, indices: np.ndarray, distances: np.ndarray, dtype: str) -> None:
+def save_topk_neighbors(
+    path: Path, indices: np.ndarray, distances: np.ndarray, dtype: str
+) -> None:
     """Save top-k neighbor indices/distances to an npz file.
 
     Args:
@@ -99,7 +101,9 @@ class TopKNeighbors:
             ValueError: If idx is out of bounds.
         """
         if idx < 0 or idx >= self.n:
-            raise ValueError(f"Index {idx} is out of bounds for neighbors (valid range: 0 <= idx < {self.n}).")
+            raise ValueError(
+                f"Index {idx} is out of bounds for neighbors (valid range: 0 <= idx < {self.n})."
+            )
         row_idx = self.indices[idx].tolist()
         row_dist = self.distances[idx].tolist()
         return list(zip(row_idx, row_dist))
