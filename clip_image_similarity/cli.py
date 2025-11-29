@@ -125,6 +125,10 @@ def run(config: RunConfig) -> None:
     Args:
         config: RunConfig instance describing inputs, outputs, and model settings.
     """
+    if config.labels_path and not config.labels_path.is_file():
+        raise FileNotFoundError(
+            f"Labels file not found at --anonymize-labels path: {config.labels_path}"
+        )
     if config.output_dir.exists() and not config.overwrite:
         raise FileExistsError(
             f"Output directory {config.output_dir} already exists. Use --overwrite to replace existing results."
@@ -145,6 +149,10 @@ def run(config: RunConfig) -> None:
             f"No images found in {config.input_dir} with extensions {config.image_exts}"
         )
     log(f"Found {plural(len(image_paths), 'image')} to process.")
+    if config.top_k is not None and config.top_k >= len(image_paths):
+        raise ValueError(
+            f"--top-k must be less than the number of images ({len(image_paths)}); got {config.top_k}."
+        )
 
     embeddings = compute_image_embeddings(
         image_paths=image_paths,
@@ -193,7 +201,10 @@ def run(config: RunConfig) -> None:
         np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
         flat_np = flat_np.astype(np_dtype, copy=False)
         np.savez_compressed(
-            pairwise_path, distances=flat_np, dtype=config.pairwise_dtype
+            pairwise_path,
+            distances=flat_np,
+            dtype=config.pairwise_dtype,
+            allow_pickle=False,
         )
 
     paths_json = config.output_dir / "image_paths.json"

@@ -16,17 +16,17 @@
 
 ## CLI (`clip_image_similarity/cli.py`)
 - Parses required run params (input/output/model/device/batch size) plus storage dtype (`--pairwise-dtype`) and optional top-k output (`--top-k`).
-- Discovers images (sorted), embeds them, computes cosine similarity -> distances.
+- Discovers images (sorted), validates `--anonymize-labels` exists, checks `top_k < num_images`, embeds them, computes cosine similarity -> distances.
 - Outputs:
-  - Flattened upper-tri distances (`evaluation_results/pairwise_distances.npz`) or top-k neighbors (`pairwise_topk.npz`).
+  - Flattened upper-tri distances (`evaluation_results/pairwise_distances.npz`, includes dtype metadata) or top-k neighbors (`pairwise_topk.npz`, includes top_k/dtype/index dtype metadata).
   - `image_paths.json`: ordered list of paths (sensitive; don’t share).
   - Optional `series_to_indices.json` if `--anonymize-labels` is provided.
   - `config.json`.
 - Overwrite protection unless `--overwrite` is set.
 
 ## Distances & Access Helpers
-- `packed_distances.py`: flatten full distance matrix, infer N, and access `distance(i, j)` via a packed upper-tri array.
-- `topk.py`: extract per-row top-k neighbors (indices + distances 2D arrays), save to npz with dtype metadata, and load/access via `TopKNeighbors`.
+- `packed_distances.py`: flatten full distance matrix, infer N, and access `distance(i, j)` via a packed upper-tri array (dtype validated).
+- `topk.py`: extract per-row top-k neighbors (indices + distances 2D arrays), save to npz with dtype/top_k/index dtype metadata, and load/access via `TopKNeighbors` with shape/dtype validation.
 
 ## Labels
 - `labels.py`: map series labels (paths) to indices matching the embedding order; errors if any label path is missing.
@@ -34,6 +34,7 @@
 ## mAP (`metrics/map.py`)
 - Supports two inputs: flattened distances (`--distances`) or top-k neighbors (`--topk`).
 - Uses series->indices JSON (or derives indices from labels + image_paths.json).
+- Validates series indices are in-range; errors if provided top-k is smaller than the largest series size.
 - Builds rankings (from packed distances or stored top-k) and computes mAP@k per series; outputs CSV with per-series and mean mAP.
 - Optional `--labeled-images-only` restricts candidates to labeled images.
 

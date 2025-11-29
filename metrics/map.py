@@ -36,6 +36,22 @@ def load_series_indices(path: Path) -> Dict[str, List[int]]:
     return result
 
 
+def _validate_series_indices(
+    series_to_indices: Dict[str, List[int]], n_items: int
+) -> Dict[str, List[int]]:
+    """Validate that all series indices fall within the neighbor source size."""
+    cleaned: Dict[str, List[int]] = {}
+    for series, idxs in series_to_indices.items():
+        unique_idxs = sorted(set(idxs))
+        for idx in unique_idxs:
+            if idx < 0 or idx >= n_items:
+                raise ValueError(
+                    f"Index {idx} in series '{series}' is out of bounds for distance data of size {n_items}."
+                )
+        cleaned[series] = unique_idxs
+    return cleaned
+
+
 def build_rankings(
     dist: PackedDistances | TopKNeighbors, candidates: Set[int], queries: Set[int]
 ) -> Dict[int, List[int]]:
@@ -214,6 +230,17 @@ def main() -> None:
         series_to_indices = map_labels_to_indices(
             Path(args.labels).resolve(), img_paths
         )
+
+    series_to_indices = _validate_series_indices(series_to_indices, neighbor_source.n)
+
+    largest_series = max((len(v) for v in series_to_indices.values()), default=0)
+    if isinstance(neighbor_source, TopKNeighbors) and largest_series > 0:
+        required_neighbors = largest_series - 1
+        if neighbor_source.k < required_neighbors:
+            raise ValueError(
+                f"Top-k neighbors (k={neighbor_source.k}) are smaller than the largest series size "
+                f"({largest_series}); rankings will miss positives. Re-run with top_k >= {required_neighbors}."
+            )
 
     labeled_union: Set[int] = set()
     for vals in series_to_indices.values():

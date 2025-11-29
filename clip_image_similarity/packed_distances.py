@@ -48,7 +48,14 @@ class PackedDistances:
 
     def __init__(self, flat: np.ndarray):
         """Initialize with a flattened upper-triangular distance array."""
+        if flat.ndim != 1:
+            raise ValueError("Flattened distances array must be 1-dimensional.")
+        if flat.dtype not in (np.float16, np.float32):
+            raise ValueError(
+                f"Distances dtype must be float16 or float32; found {flat.dtype}."
+            )
         self.flat = flat
+        self.dtype = str(flat.dtype)
         self.n = _infer_n_from_length(len(flat))
 
     def _pair_index(self, i: int, j: int) -> int:

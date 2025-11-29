@@ -3,15 +3,15 @@
 CLI and library to embed a folder of images with a CLIP model and export a compact, flattened pairwise distance array for series retrieval evaluation.
 
 ## Quickstart
-
-```bash
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /tmp/clip-results \
-  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --batch-size 16 \
-  --device cuda
-```
+- Install dependencies (venv, Poetry, or system) and run the CLI:
+  ```bash
+  python -m clip_image_similarity.cli \
+    --input-dir /path/to/images \
+    --output-dir /tmp/clip-results \
+    --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+    --batch-size 16 \
+    --device cuda
+  ```
 
 ## How to Run
 
@@ -26,7 +26,6 @@ make run \
   TOP_K=1000 \
   OVERWRITE=1
 ```
-make run INPUT_DIR=./resources/images OUTPUT_DIR=./results MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384  BATCH_SIZE=16
 
 Option 2: Create venv with Makefile, then run Python manually
 ```bash
@@ -43,8 +42,22 @@ python -m clip_image_similarity.cli \
 python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results_3 --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 --batch-size 16 
 ```
 
+Option 3: Poetry
+```bash
+poetry install
+poetry run clip-pairwise-eval \
+  --input-dir /path/to/images \
+  --output-dir /tmp/clip-results \
+  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+  --device cpu \
+  --top-k 1000
+# OR
+poetry run python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384
+```
+
 ## Outputs
-- `evaluation_results/pairwise_distances.npz`: flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`.
+- `evaluation_results/pairwise_distances.npz`: flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with `allow_pickle=False` and dtype metadata.
+- `evaluation_results/pairwise_topk.npz` (when `--top-k` is set): per-image neighbor indices/distances plus stored `top_k`, dtype, and index dtype metadata.
 - `image_paths.json`: ordered list of image paths corresponding to indices in the flattened array. **DO NOT SHARE THIS FILE IF YOU NEED TO KEEP FILE NAMES PRIVATE**
 - `series_to_indices.json` (optional): only written if `--anonymize-labels` is provided; maps series -> list of indices for downstream mAP without exposing paths.
 - `config.json`: run configuration snapshot.
@@ -58,8 +71,6 @@ python -m metrics.map \
   --distances ./results/evaluation_results/pairwise_distances.npz \
   --series-indices ./results/series_to_indices.json \
   --output_csv ./results/metrics/map.csv
-# OR
-python -m metrics.map --distances ./results_3/evaluation_results/pairwise_distances.npz --series-indices ./results_3/series_to_indices.json --output_csv ./results_3/metrics/map.csv
 ```
 
 If you saved top-k neighbors instead of the full flattened distances:
@@ -70,4 +81,11 @@ python -m metrics.map \
   --output_csv ./results/metrics/map.csv
 ```
 
-If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames.
+If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames:
+```bash
+python -m metrics.map \
+  --distances ./results/evaluation_results/pairwise_distances.npz \
+  --labels ./resources/labels/images_series_labels.json \
+  --image-paths ./results/image_paths.json \
+  --output_csv ./results/metrics/map.csv
+```
