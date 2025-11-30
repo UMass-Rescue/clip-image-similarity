@@ -75,36 +75,154 @@ def test_build_rankings_with_packed_distances():
 
 
 def test_build_rankings_with_topk_and_bounds():
-    indices = np.array([[1], [0]], dtype=np.uint16)
-    distances = np.array([[0.5], [0.6]], dtype=np.float32)
-    topk = TopKNeighbors(indices, distances, top_k=1, dtype="float32")
-    rankings = map_mod.build_rankings(topk, {0, 1}, {0, 1})
-    assert rankings == {0: [1], 1: [0]}
-    with pytest.raises(ValueError):
-        map_mod.build_rankings(topk, {0, 1}, {2})
-
-
-def test_average_precision_and_map():
-    preds = [1, 2, 3]
-    positives = {2, 3}
-    assert map_mod.average_precision_at_k(preds, positives, k=3) == pytest.approx(
-        (1 / 2 + 2 / 3) / 2
+    indices = np.array(
+        [
+            [1, 2],
+            [0, 2],
+            [0, 1],
+        ],
+        dtype=np.uint16,
     )
-    assert map_mod.average_precision_at_k([], set(), k=3) == 0.0
-    # k cutoff branch when no positives found
-    assert map_mod.average_precision_at_k([1, 2], {3}, k=1) == 0.0
+    distances = np.array(
+        [
+            [0.3, 0.8],
+            [0.4, 0.9],
+            [0.2, 0.7],
+        ],
+        dtype=np.float32,
+    )
+    topk = TopKNeighbors(indices, distances, top_k=2, dtype="float32")
+    rankings = map_mod.build_rankings(topk, {0, 1, 2}, {0, 1, 2})
+    assert rankings == {0: [1, 2], 1: [0, 2], 2: [0, 1]}
 
-    preds_by_query = {0: [1, 2], 1: [0, 2]}
+    # Candidate filtering should drop neighbors not in the allowed set.
+    filtered = map_mod.build_rankings(topk, {2}, {0, 1})
+    assert filtered == {0: [2], 1: [2]}
+
+    with pytest.raises(ValueError):
+        map_mod.build_rankings(topk, {0, 1, 2}, {3})
+
+
+@pytest.mark.parametrize(
+    (
+        "case_name",
+        "preds",
+        "positives",
+        "k",
+        "expected_ap",
+    ),
+    [
+        (
+            "two_hits_top3",
+            [1, 2, 3],
+            {2, 3},
+            3,
+            (1 / 2 + 2 / 3) / 2,
+        ),
+        (
+            "no_predictions",
+            [],
+            set(),
+            3,
+            0.0,
+        ),
+        (
+            "cutoff_before_hit",
+            [1, 2],
+            {3},
+            1,
+            0.0,
+        ),
+        (
+            "single_positive_late_hit",
+            [0, 1, 2],
+            {2},
+            5,
+            1 / 3,
+        ),
+    ],
+)
+def test_average_precision(case_name, preds, positives, k, expected_ap):
+    """Detailed AP@k breakdowns for varied ranking situations.
+
+    two_hits_top3:
+      - Positives {2,3} appear at ranks 2 and 3, giving precisions 1/2 and 2/3.
+      - denom=min(k, |positives|)=2, so AP = ((1/2)+(2/3))/2.
+
+    no_predictions:
+      - Either no predictions or no positives → hits never occur → AP=0.
+
+    cutoff_before_hit:
+      - k=1 limits us to the first prediction, which misses the only positive.
+      - denom=min(1,1)=1 and hits=0, so AP=0.
+
+    single_positive_late_hit:
+      - Only target is index 2, retrieved at rank 3.
+      - denom=min(5,1)=1, so AP equals precision at that hit: 1/3.
+    """
+
+    assert map_mod.average_precision_at_k(preds, positives, k=k) == pytest.approx(expected_ap)
+
+
+def test_mean_average_precision_partial_recall():
+    """Explain a mixed-quality mAP@k computation for two queries.
+
+    Query 0: predictions [1,2]; only positive is 1, found at rank 1 → AP=1.0.
+    Query 1: predictions [2,0]; positive is 0, found at rank 2 → precision 1/2, denom=1 → AP=0.5.
+    Averaging APs for queries {0,1} yields mean average precision (1.0 + 0.5) / 2 = 0.75.
+    """
+
+    preds_by_query = {0: [1, 2], 1: [2, 0]}
     positives_lookup = {0: {1}, 1: {0}}
-    m = map_mod.mean_average_precision_at_k(preds_by_query, {0, 1}, k=2, positives_lookup=positives_lookup)
-    assert m == pytest.approx(1.0)
+    result = map_mod.mean_average_precision_at_k(preds_by_query, {0, 1}, k=2, positives_lookup=positives_lookup)
+    assert result == pytest.approx(0.75)
 
 
-def test_compute_series_map_and_errors():
-    rankings = {0: [1], 1: [0]}
-    series_to_indices = {"s": [0, 1]}
-    result = map_mod.compute_series_map(series_to_indices, rankings, max_k=1)
-    assert result == {"s": [1.0]}
+@pytest.mark.parametrize(
+    ("case_name", "rankings", "series_to_indices", "max_k", "expected"),
+    [
+        (
+            "two_images_k1",
+            {0: [1], 1: [0]},
+            {"s": [0, 1]},
+            1,
+            {"s": [1.0]},
+        ),
+        (
+            "three_images_k3_partial",
+            {
+                0: [3, 2, 1],
+                1: [3, 0, 2],
+                2: [3, 0, 1],
+                3: [0, 1, 2],
+            },
+            {"s": [0, 1, 2]},
+            3,
+            {"s": [0.0, 0.25, 7 / 12]},
+        ),
+    ],
+)
+def test_compute_series_map_and_errors(case_name, rankings, series_to_indices, max_k, expected):
+    """Ensure compute_series_map produces intuitive mAP@k curves for multiple scenarios.
+
+    Two-image scenario (map@1=1.0):
+      - Each query has one relevant partner and the rankings list it first.
+      - At k=1 we have denom=min(k, len(positives))=min(1, 1)=1, precision is 1/1 at rank 1, so AP per query is 1.0.
+      - Averaging across both queries yields map@1=1.0.
+
+    Three-image scenario (map@1=0, map@2=0.25, map@3=7/12):
+      - Positives per query are the other two series members; rank 3 is an unrelated distractor placed first.
+      - k=1: denom=min(1, 2)=1, top prediction misses, so AP=0 for each query → map@1=0.
+      - k=2: first hit occurs at rank 2, giving precision 1/2; denom=min(2, 2)=2 → AP=(1/2)/2=0.25.
+      - k=3: hits at ranks 2 and 3 yield precisions 1/2 and 2/3; AP=(1/2+2/3)/2=7/12 → map@3=7/12.
+    """
+
+    result = map_mod.compute_series_map(series_to_indices, rankings, max_k=max_k)
+    assert set(result.keys()) == set(expected.keys())
+    for series, values in expected.items():
+        assert len(result[series]) == len(values)
+        for got, want in zip(result[series], values):
+            assert got == pytest.approx(want)
 
     with pytest.raises(ValueError):
         map_mod.compute_series_map({"s": [0]}, rankings, max_k=1)
