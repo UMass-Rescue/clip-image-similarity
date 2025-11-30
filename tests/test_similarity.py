@@ -5,7 +5,9 @@ from clip_image_similarity.similarity import SimilarityComputer
 
 def test_similarity_computer_cosine_and_distance(monkeypatch):
     logs = []
-    monkeypatch.setattr("clip_image_similarity.similarity.log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(
+        "clip_image_similarity.similarity.log", lambda msg: logs.append(msg)
+    )
 
     embeddings = torch.tensor(
         [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32

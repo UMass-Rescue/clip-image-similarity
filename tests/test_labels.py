@@ -56,9 +56,7 @@ def test_map_labels_errors_on_missing_paths(tmp_path):
     present = tmp_path / "a.jpg"
     present.write_text("x", encoding="utf-8")
     missing_path = tmp_path / "missing.jpg"
-    labels_path = write_labels(
-        tmp_path, {"series": [str(present), str(missing_path)]}
-    )
+    labels_path = write_labels(tmp_path, {"series": [str(present), str(missing_path)]})
     with pytest.raises(ValueError) as exc:
         map_labels_to_indices(labels_path, [present])
     assert "missing.jpg" in str(exc.value)

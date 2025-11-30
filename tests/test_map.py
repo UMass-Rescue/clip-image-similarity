@@ -187,7 +187,9 @@ def test_average_precision(case_name, preds, positives, k, expected_ap):
       - denom=min(5,1)=1, so AP equals precision at that hit: 1/3.
     """
 
-    assert map_mod.average_precision_at_k(preds, positives, k=k) == pytest.approx(expected_ap)
+    assert map_mod.average_precision_at_k(preds, positives, k=k) == pytest.approx(
+        expected_ap
+    )
 
 
 def test_mean_average_precision_partial_recall():
@@ -200,7 +202,9 @@ def test_mean_average_precision_partial_recall():
 
     preds_by_query = {0: [1, 2], 1: [2, 0]}
     positives_lookup = {0: {1}, 1: {0}}
-    result = map_mod.mean_average_precision_at_k(preds_by_query, {0, 1}, k=2, positives_lookup=positives_lookup)
+    result = map_mod.mean_average_precision_at_k(
+        preds_by_query, {0, 1}, k=2, positives_lookup=positives_lookup
+    )
     assert result == pytest.approx(0.75)
 
 
@@ -228,7 +232,9 @@ def test_mean_average_precision_partial_recall():
         ),
     ],
 )
-def test_compute_series_map_and_errors(case_name, rankings, series_to_indices, max_k, expected):
+def test_compute_series_map_and_errors(
+    case_name, rankings, series_to_indices, max_k, expected
+):
     """Ensure compute_series_map produces intuitive mAP@k curves for multiple scenarios.
 
     Two-image scenario (map@1=1.0):
@@ -317,8 +323,12 @@ def test_main_with_topk_and_labels(tmp_path, monkeypatch):
         p = tmp_path / name
         p.write_text("x", encoding="utf-8")
         imgs.append(p)
-    labels_path = write_json(tmp_path, "labels.json", {"s": [p.as_posix() for p in imgs[:2]]})
-    image_paths_path = write_json(tmp_path, "image_paths.json", [p.as_posix() for p in imgs])
+    labels_path = write_json(
+        tmp_path, "labels.json", {"s": [p.as_posix() for p in imgs[:2]]}
+    )
+    image_paths_path = write_json(
+        tmp_path, "image_paths.json", [p.as_posix() for p in imgs]
+    )
     indices = np.array([[1, 2], [0, 2], [0, 1]], dtype=np.uint16)
     distances = np.array([[0.1, 0.2], [0.1, 0.3], [0.2, 0.4]], dtype=np.float32)
     topk_path = write_npz_topk(tmp_path, indices, distances)

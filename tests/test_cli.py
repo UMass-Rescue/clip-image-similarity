@@ -87,7 +87,9 @@ def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
         overwrite=True,
     )
     cli.run(config)
-    data = np.load(out_dir / "evaluation_results" / "pairwise_distances.npz", allow_pickle=False)
+    data = np.load(
+        out_dir / "evaluation_results" / "pairwise_distances.npz", allow_pickle=False
+    )
     assert data["distances"].dtype == np.float16
     assert data["dtype"] == "float16"
 
@@ -302,7 +304,9 @@ def test_cli_errors(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cli,
         "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor([[1.0]], dtype=torch.float32),
+        lambda image_paths, model_id, device, batch_size: torch.tensor(
+            [[1.0]], dtype=torch.float32
+        ),
     )
     # Create existing pairwise file to trigger overwrite protection
     out_exist = tmp_path / "out_err4"
@@ -351,9 +355,13 @@ def test_cli_main_module_guard(monkeypatch, tmp_path):
             [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
         ),
     )
-    monkeypatch.setattr(cli, "compute_image_embeddings", lambda *a, **k: torch.tensor(
-        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
-    ))
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings",
+        lambda *a, **k: torch.tensor(
+            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+        ),
+    )
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
     argv = [

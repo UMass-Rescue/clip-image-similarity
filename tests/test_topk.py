@@ -22,7 +22,11 @@ def test_extract_topk_neighbors_float32():
     assert indices.shape == (3, 1)
     assert distances.shape == (3, 1)
     assert indices[:, 0].tolist() == [2, 2, 0]
-    assert distances[:, 0].tolist() == [pytest.approx(1.0), pytest.approx(2.0), pytest.approx(1.0)]
+    assert distances[:, 0].tolist() == [
+        pytest.approx(1.0),
+        pytest.approx(2.0),
+        pytest.approx(1.0),
+    ]
     assert distances.dtype == np.float32
 
 
@@ -79,10 +83,22 @@ def test_topkneighbors_neighbors_bounds_check(tmp_path):
 @pytest.mark.parametrize(
     ("indices", "distances"),
     [
-        (np.ones((2, 2, 1), dtype=np.uint16), np.ones((2, 2), dtype=np.float32)),  # ndim mismatch
-        (np.ones((2, 2), dtype=np.uint16), np.ones((2, 1), dtype=np.float32)),  # shape mismatch
-        (np.ones((2, 2), dtype=np.uint16), np.ones((2, 2), dtype=np.int32)),  # bad distances dtype
-        (np.ones((2, 2), dtype=np.float32), np.ones((2, 2), dtype=np.float32)),  # indices not int
+        (
+            np.ones((2, 2, 1), dtype=np.uint16),
+            np.ones((2, 2), dtype=np.float32),
+        ),  # ndim mismatch
+        (
+            np.ones((2, 2), dtype=np.uint16),
+            np.ones((2, 1), dtype=np.float32),
+        ),  # shape mismatch
+        (
+            np.ones((2, 2), dtype=np.uint16),
+            np.ones((2, 2), dtype=np.int32),
+        ),  # bad distances dtype
+        (
+            np.ones((2, 2), dtype=np.float32),
+            np.ones((2, 2), dtype=np.float32),
+        ),  # indices not int
     ],
 )
 def test_topkneighbors_init_validation(indices, distances):
