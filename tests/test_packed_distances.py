@@ -4,6 +4,7 @@ import torch
 
 from clip_image_similarity.packed_distances import (
     PackedDistances,
+    _infer_n_from_length,
     flatten_upper_triangle,
 )
 
@@ -30,6 +31,12 @@ def test_flatten_upper_triangle_order():
     assert torch.allclose(flat, expected)
 
 
+def test_flatten_upper_triangle_requires_square():
+    dist_matrix = torch.tensor([[0.0, 1.0, 2.0], [1.0, 0.0, 3.0]], dtype=torch.float32)
+    with pytest.raises(ValueError):
+        flatten_upper_triangle(dist_matrix)
+
+
 @pytest.fixture()
 def packed():
     flat = flatten_upper_triangle(_build_dist_matrix()).numpy()
@@ -47,6 +54,11 @@ def packed():
 )
 def test_packed_distance_lookup(packed, i, j, expected):
     assert packed.distance(i, j) == pytest.approx(expected)
+
+
+def test_packed_distance_self_lookup_rejected(packed):
+    with pytest.raises(ValueError):
+        packed.distance(1, 1)
 
 
 @pytest.mark.parametrize(
@@ -78,3 +90,17 @@ def test_packed_distances_load_missing_key_raises(tmp_path):
     np.savez_compressed(out, other=np.array([1.0], dtype=np.float32))
     with pytest.raises(KeyError):
         PackedDistances.load(out)
+
+
+@pytest.mark.parametrize(
+    "length",
+    [0, -1],
+)
+def test_infer_n_rejects_non_positive_length(length):
+    with pytest.raises(ValueError):
+        _infer_n_from_length(length)
+
+
+def test_infer_n_rejects_incompatible_length():
+    with pytest.raises(ValueError):
+        _infer_n_from_length(5)  # 5 is not n*(n-1)/2 for any integer n
