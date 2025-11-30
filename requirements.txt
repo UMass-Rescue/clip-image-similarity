@@ -1,5 +1,5 @@
-torch
-open_clip_torch
-pillow
-tqdm
-numpy
+torch>=2.2.0,<3.0.0
+open_clip_torch>=3.2.0,<4.0.0
+pillow>=10.0.0,<11.0.0
+tqdm>=4.67.0,<5.0.0
+numpy>=1.26.0,<3.0.0

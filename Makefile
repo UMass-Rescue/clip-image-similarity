@@ -3,7 +3,7 @@ VENV := .venv
 PYTHON_BIN := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: venv install run
+.PHONY: venv install run test
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -22,4 +22,9 @@ run: install
 		--model $(MODEL) \
 		$(if $(BATCH_SIZE),--batch-size $(BATCH_SIZE),) \
 		$(if $(DEVICE),--device $(DEVICE),) \
+		$(if $(TOP_K),--top-k $(TOP_K),) \
 		$(if $(OVERWRITE),--overwrite,)
+
+test: install
+	$(PIP) install pytest pytest-cov
+	$(PYTHON_BIN) -m pytest --cov=clip_image_similarity --cov=metrics --cov-report=term-missing tests

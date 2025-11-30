@@ -1,21 +1,32 @@
 # Clip Image Similarity
 
-CLI and library to embed a folder of images with a CLIP model and export a compact, flattened pairwise distance array for series retrieval evaluation.
+[![codecov](https://codecov.io/gh/UMass-Rescue/clip-image-similarity/graph/badge.svg?token=UI639IVPVS)](https://codecov.io/gh/UMass-Rescue/clip-image-similarity) [![Tests](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml/badge.svg)](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml)
+
+CLI and library to embed a folder of images with a CLIP model, compute cosine-similarity distances, and export compact retrieval artifacts (flattened upper-tri arrays or per-image top-k neighbors). Use the outputs directly for series retrieval metrics such as mAP while keeping file paths private when needed.
+
+## Features
+
+- Deterministic image ordering + embeddings for reproducible indices
+- Packed upper-triangular distance arrays for space-efficient storage
+- Optional sparse top-k neighbor export with dtype/index metadata
+- Label anonymization helper that maps sensitive paths to indices
+- Metrics toolkit (`metrics/map.py`) for computing mAP@k from either packed distances or stored neighbors
 
 ## Quickstart
 
-```bash
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /tmp/clip-results \
-  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --batch-size 16 \
-  --device cuda
-```
+Install dependencies (venv, Poetry, or system) and run the CLI:
+  ```bash
+  python -m clip_image_similarity.cli \
+    --input-dir /path/to/images \
+    --output-dir /tmp/clip-results \
+    --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+    --batch-size 16 \
+    --device cuda
+  ```
 
 ## How to Run
 
-Option 1: Use the Makefile (auto-creates venv and installs deps)
+**Option 1: Makefile (auto-creates venv and installs deps)**
 ```bash
 make run \
   INPUT_DIR=/path/to/images \
@@ -23,11 +34,11 @@ make run \
   MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
   BATCH_SIZE=16 \
   DEVICE=cuda \
+  TOP_K=1000 \
   OVERWRITE=1
 ```
-make run INPUT_DIR=./resources/images OUTPUT_DIR=./results MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384  BATCH_SIZE=16
 
-Option 2: Create venv with Makefile, then run Python manually
+**Option 2: Create venv with Makefile, then run Python manually**
 ```bash
 make install                     # sets up .venv and installs requirements
 source .venv/bin/activate
@@ -36,28 +47,60 @@ python -m clip_image_similarity.cli \
   --output-dir /tmp/clip-results \
   --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
   --batch-size 16 \
-  --device cuda
+  --device cuda \
+  --top-k 1000  # optional: save per-image top-k neighbors instead of full flattened distances
 # OR
 python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results_3 --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 --batch-size 16 
 ```
 
+**Option 3: Poetry**
+```bash
+poetry install
+poetry run clip-pairwise-eval \
+  --input-dir /path/to/images \
+  --output-dir /tmp/clip-results \
+  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+  --device cpu \
+  --top-k 1000
+# OR
+poetry run python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384
+```
+
 ## Outputs
-- `evaluation_results/pairwise_distances.npz`: flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`.
-- `image_paths.json`: ordered list of image paths corresponding to indices in the flattened array. **DO NOT SHARE THIS FILE IF YOU NEED TO KEEP FILE NAMES PRIVATE**
-- `series_to_indices.json` (optional): only written if `--anonymize-labels` is provided; maps series -> list of indices for downstream mAP without exposing paths.
-- `config.json`: run configuration snapshot.
+
+| File | Description |
+| --- | --- |
+| `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with `allow_pickle=False` and dtype metadata. |
+| `evaluation_results/pairwise_topk.npz` | Emitted when `--top-k` is set; contains per-image neighbor indices/distances plus stored `top_k`, dtype, and index dtype metadata. |
+| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
+| `series_to_indices.json` | Optional; only written when `--anonymize-labels` is provided. Maps series -> list of indices for downstream mAP while keeping paths private. |
+| `config.json` | Snapshot of the run configuration for auditing/repro. |
 
 Progress bars and timestamped logs show progress through discovery, embedding, and distance calculation.
 
 ## Compute mAP (optional)
+
 After generating results, compute Mean Average Precision from the flattened distances and series indices:
 ```bash
 python -m metrics.map \
   --distances ./results/evaluation_results/pairwise_distances.npz \
   --series-indices ./results/series_to_indices.json \
   --output_csv ./results/metrics/map.csv
-# OR
-python -m metrics.map --distances ./results_3/evaluation_results/pairwise_distances.npz --series-indices ./results_3/series_to_indices.json --output_csv ./results_3/metrics/map.csv
 ```
 
-If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames.
+If you saved top-k neighbors instead of the full flattened distances:
+```bash
+python -m metrics.map \
+  --topk ./results/evaluation_results/pairwise_topk.npz \
+  --series-indices ./results/series_to_indices.json \
+  --output_csv ./results/metrics/map.csv
+```
+
+If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames:
+```bash
+python -m metrics.map \
+  --distances ./results/evaluation_results/pairwise_distances.npz \
+  --labels ./resources/labels/images_series_labels.json \
+  --image-paths ./results/image_paths.json \
+  --output_csv ./results/metrics/map.csv
+```

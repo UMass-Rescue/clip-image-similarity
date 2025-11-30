@@ -45,7 +45,12 @@ class ClipEmbedder:
         log(f"Encoding {plural(total, 'image')} with batch size {batch_size}.")
 
         with torch.no_grad():
-            for batch_paths in tqdm(batched(image_paths, batch_size), total=(total + batch_size - 1) // batch_size, desc="Embedding", unit="batch"):
+            for batch_paths in tqdm(
+                batched(image_paths, batch_size),
+                total=(total + batch_size - 1) // batch_size,
+                desc="Embedding",
+                unit="batch",
+            ):
                 images = [self._load_image(p) for p in batch_paths]
                 batch = torch.stack(images, dim=0).to(self.device)
                 feats = self.model.encode_image(batch)
@@ -76,7 +81,9 @@ class ClipEmbedder:
         return self.preprocess(image)
 
 
-def compute_image_embeddings(image_paths: List[Path], model_id: str, device: str, batch_size: int) -> torch.Tensor:
+def compute_image_embeddings(
+    image_paths: List[Path], model_id: str, device: str, batch_size: int
+) -> torch.Tensor:
     """Compute embeddings for image_paths with the specified model id.
 
     Args:

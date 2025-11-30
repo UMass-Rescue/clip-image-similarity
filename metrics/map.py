@@ -8,6 +8,7 @@ import numpy as np
 
 from clip_image_similarity.labels import map_labels_to_indices
 from clip_image_similarity.packed_distances import PackedDistances
+from clip_image_similarity.topk import TopKNeighbors
 
 
 def load_series_indices(path: Path) -> Dict[str, List[int]]:
@@ -35,13 +36,29 @@ def load_series_indices(path: Path) -> Dict[str, List[int]]:
     return result
 
 
+def _validate_series_indices(
+    series_to_indices: Dict[str, List[int]], n_items: int
+) -> Dict[str, List[int]]:
+    """Validate that all series indices fall within the neighbor source size."""
+    cleaned: Dict[str, List[int]] = {}
+    for series, idxs in series_to_indices.items():
+        unique_idxs = sorted(set(idxs))
+        for idx in unique_idxs:
+            if idx < 0 or idx >= n_items:
+                raise ValueError(
+                    f"Index {idx} in series '{series}' is out of bounds for distance data of size {n_items}."
+                )
+        cleaned[series] = unique_idxs
+    return cleaned
+
+
 def build_rankings(
-    dist: PackedDistances, candidates: Set[int], queries: Set[int]
+    dist: PackedDistances | TopKNeighbors, candidates: Set[int], queries: Set[int]
 ) -> Dict[int, List[int]]:
     """Build neighbor rankings (by index) for each query index.
 
     Args:
-        dist: PackedDistances accessor.
+        dist: PackedDistances or TopKNeighbors accessor.
         candidates: Candidate indices to consider.
         queries: Query indices to build rankings for.
     Returns:
@@ -49,12 +66,17 @@ def build_rankings(
     """
     rankings: Dict[int, List[int]] = {}
     for q in queries:
-        neighbors = []
-        for j in candidates:
-            if j == q:
-                continue
-            neighbors.append((j, dist.distance(q, j)))
-        neighbors.sort(key=lambda kv: kv[1])
+        if isinstance(dist, TopKNeighbors):
+            if not (0 <= q < dist.n):
+                raise ValueError(
+                    f"Query index {q} is out of bounds for TopKNeighbors (valid range: 0 to {dist.n - 1})."
+                )
+            neighbors = [
+                (j, d) for j, d in dist.neighbors(q) if j in candidates and j != q
+            ]
+        else:
+            neighbors = [(j, dist.distance(q, j)) for j in candidates if j != q]
+            neighbors.sort(key=lambda kv: kv[1])
         rankings[q] = [idx for idx, _ in neighbors]
     return rankings
 
@@ -124,7 +146,9 @@ def compute_series_map(
     return series_map
 
 
-def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path) -> None:
+def write_series_map_csv(
+    series_to_map: Dict[str, List[float]], output_csv: Path
+) -> None:
     """Write per-series and mean mAP values to CSV."""
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     max_k = max((len(v) for v in series_to_map.values()), default=0)
@@ -150,8 +174,19 @@ def write_series_map_csv(series_to_map: Dict[str, List[float]], output_csv: Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compute mAP@k from flattened pairwise distances and labels.")
-    parser.add_argument("--distances", required=True, help="Path to npz file containing flattened distances.")
+    parser = argparse.ArgumentParser(
+        description="Compute mAP@k from flattened pairwise distances and labels."
+    )
+    parser.add_argument(
+        "--distances",
+        required=False,
+        help="Path to npz file containing flattened distances (upper-tri). Required unless --topk is provided.",
+    )
+    parser.add_argument(
+        "--topk",
+        required=False,
+        help="Path to npz file containing top-k neighbors (indices/distances). Required unless --distances is provided.",
+    )
     parser.add_argument(
         "--series-indices",
         help="Optional path to JSON mapping series -> list of indices (preferred for privacy).",
@@ -175,24 +210,46 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dist_path = Path(args.distances).resolve()
-    packed = PackedDistances.load(dist_path)
+    if args.distances:
+        dist_path = Path(args.distances).resolve()
+        neighbor_source = PackedDistances.load(dist_path)
+    elif args.topk:
+        neighbor_source = TopKNeighbors.load(Path(args.topk).resolve())
+    else:
+        raise ValueError("Exactly one of --distances or --topk must be provided.")
 
     if args.series_indices:
         series_to_indices = load_series_indices(Path(args.series_indices).resolve())
     else:
         if not args.labels or not args.image_paths:
-            raise ValueError("Provide either --series-indices or both --labels and --image-paths.")
+            raise ValueError(
+                "Provide either --series-indices or both --labels and --image-paths."
+            )
         image_paths = json.loads(Path(args.image_paths).read_text())
         img_paths = [Path(p) for p in image_paths]
-        series_to_indices = map_labels_to_indices(Path(args.labels).resolve(), img_paths)
+        series_to_indices = map_labels_to_indices(
+            Path(args.labels).resolve(), img_paths
+        )
+
+    series_to_indices = _validate_series_indices(series_to_indices, neighbor_source.n)
+
+    largest_series = max((len(v) for v in series_to_indices.values()), default=0)
+    if isinstance(neighbor_source, TopKNeighbors) and largest_series > 0:
+        required_neighbors = largest_series - 1
+        if neighbor_source.k < required_neighbors:
+            raise ValueError(
+                f"Top-k neighbors (k={neighbor_source.k}) are smaller than the largest series size "
+                f"({largest_series}); rankings will miss positives. Re-run with top_k >= {required_neighbors}."
+            )
 
     labeled_union: Set[int] = set()
     for vals in series_to_indices.values():
         labeled_union.update(vals)
 
-    candidates = labeled_union if args.labeled_images_only else set(range(packed.n))
-    rankings = build_rankings(packed, candidates, labeled_union)
+    candidates = (
+        labeled_union if args.labeled_images_only else set(range(neighbor_source.n))
+    )
+    rankings = build_rankings(neighbor_source, candidates, labeled_union)
     max_k = max(len(v) for v in series_to_indices.values())
     series_map = compute_series_map(series_to_indices, rankings, max_k)
     write_series_map_csv(series_map, Path(args.output_csv).resolve())
