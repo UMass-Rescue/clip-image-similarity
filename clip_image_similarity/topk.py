@@ -47,7 +47,9 @@ def extract_topk_neighbors(
     return indices_np, dist_np
 
 
-def save_topk_neighbors(path: Path, indices: np.ndarray, distances: np.ndarray, dtype: str) -> None:
+def save_topk_neighbors(
+    path: Path, indices: np.ndarray, distances: np.ndarray, dtype: str
+) -> None:
     """Save top-k neighbor indices/distances to an npz file.
 
     Args:
@@ -72,7 +74,31 @@ def save_topk_neighbors(path: Path, indices: np.ndarray, distances: np.ndarray, 
 class TopKNeighbors:
     """Helper for accessing top-k neighbor structure stored as 2D arrays."""
 
-    def __init__(self, indices: np.ndarray, distances: np.ndarray):
+    def __init__(
+        self,
+        indices: np.ndarray,
+        distances: np.ndarray,
+        *,
+        top_k: int | None = None,
+        dtype: str | None = None,
+    ):
+        if indices.ndim != 2 or distances.ndim != 2:
+            raise ValueError("indices and distances must be 2D arrays.")
+        if indices.shape != distances.shape:
+            raise ValueError(
+                f"indices shape {indices.shape} does not match distances shape {distances.shape}."
+            )
+        if distances.dtype not in (np.float16, np.float32):
+            raise ValueError(
+                f"Distances dtype must be float16 or float32; found {distances.dtype}."
+            )
+        if not np.issubdtype(indices.dtype, np.integer):
+            raise ValueError(f"indices dtype must be integer; found {indices.dtype}.")
+        k = indices.shape[1]
+        if top_k is not None and top_k != k:
+            raise ValueError(f"top_k metadata ({top_k}) does not match array width ({k}).")
+        self.dtype = dtype or str(distances.dtype)
+        self.index_dtype = str(indices.dtype)
         self.indices = indices
         self.distances = distances
         self.n, self.k = indices.shape
@@ -81,9 +107,30 @@ class TopKNeighbors:
     def load(cls, path: Path) -> "TopKNeighbors":
         """Load top-k neighbors from an npz file."""
         data = np.load(path, allow_pickle=False)
-        if "indices" not in data or "distances" not in data:
-            raise KeyError("npz file must contain 'indices' and 'distances'.")
-        return cls(data["indices"], data["distances"])
+        required_keys = {"indices", "distances", "top_k", "dtype"}
+        missing = required_keys - set(data.files)
+        if missing:
+            raise KeyError(
+                f"npz file must contain keys {sorted(required_keys)}; missing {sorted(missing)}."
+            )
+        neighbors = cls(
+            data["indices"],
+            data["distances"],
+            top_k=int(data["top_k"]),
+            dtype=str(data["dtype"]),
+        )
+        stored_dtype = str(data["dtype"])
+        if stored_dtype != neighbors.dtype:
+            raise ValueError(
+                f"dtype metadata ({stored_dtype}) does not match loaded distances dtype ({neighbors.dtype})."
+            )
+        if "index_dtype" in data:
+            stored_index_dtype = str(data["index_dtype"])
+            if stored_index_dtype != neighbors.index_dtype:
+                raise ValueError(
+                    f"index_dtype metadata ({stored_index_dtype}) does not match loaded dtype ({neighbors.index_dtype})."
+                )
+        return neighbors
 
     def neighbors(self, idx: int) -> List[Tuple[int, float]]:
         """
@@ -99,7 +146,9 @@ class TopKNeighbors:
             ValueError: If idx is out of bounds.
         """
         if idx < 0 or idx >= self.n:
-            raise ValueError(f"Index {idx} is out of bounds for neighbors (valid range: 0 <= idx < {self.n}).")
+            raise ValueError(
+                f"Index {idx} is out of bounds for neighbors (valid range: 0 <= idx < {self.n})."
+            )
         row_idx = self.indices[idx].tolist()
         row_dist = self.distances[idx].tolist()
         return list(zip(row_idx, row_dist))
