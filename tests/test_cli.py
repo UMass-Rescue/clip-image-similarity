@@ -22,6 +22,11 @@ def make_images(tmp_path: Path, count: int = 3):
 
 
 def test_cli_run_pairwise(monkeypatch, tmp_path):
+    """End-to-end pairwise run should save flattened distances and image paths.
+
+    By stubbing discovery and embeddings we expect cli.run to finish, emit the
+    pairwise npz with float32 metadata, and persist the image ordering JSON.
+    """
     images = make_images(tmp_path / "input")
     out_dir = tmp_path / "out_pairwise"
 
@@ -55,6 +60,11 @@ def test_cli_run_pairwise(monkeypatch, tmp_path):
 
 
 def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
+    """Pairwise run with float16 storage should downcast distances on disk.
+
+    With deterministic embeddings we expect the saved npz file to contain
+    float16 distances and metadata after the run completes successfully.
+    """
     images = make_images(tmp_path / "input_f16")
     out_dir = tmp_path / "out_pairwise_f16"
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
@@ -83,6 +93,11 @@ def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
 
 
 def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
+    """Top-k mode should emit sparse neighbors plus series-to-indices mapping.
+
+    The CLI should save pairwise_topk.npz with the requested dtype/k metadata,
+    and since labels_path is provided it must also write series_to_indices.json.
+    """
     images = make_images(tmp_path / "input_topk")
     labels_payload = {"series": [p.as_posix() for p in images[:2]]}
     labels_path = tmp_path / "labels.json"
@@ -123,6 +138,7 @@ def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
 
 
 def test_cli_main_entrypoint(monkeypatch, tmp_path):
+    """cli.main should parse argv and drive a default pairwise run to completion."""
     images = make_images(tmp_path / "input_main")
     out_dir = tmp_path / "out_main"
     pairwise_path = out_dir / "evaluation_results" / "pairwise_distances.npz"
@@ -156,6 +172,11 @@ def test_cli_main_entrypoint(monkeypatch, tmp_path):
 
 
 def test_cli_existing_topk_and_pairwise_files(monkeypatch, tmp_path):
+    """Running without --overwrite should raise when outputs already exist.
+
+    We pre-create both pairwise and top-k artifacts; cli.run must surface
+    FileExistsError to keep users from clobbering results accidentally.
+    """
     images = make_images(tmp_path / "input_exist")
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(
@@ -217,6 +238,13 @@ def test_cli_existing_topk_and_pairwise_files(monkeypatch, tmp_path):
 
 
 def test_cli_errors(monkeypatch, tmp_path):
+    """Bundle of negative scenarios to ensure cli.run enforces its guards.
+
+    Missing labels should trigger FileNotFoundError, pre-existing output dirs
+    should block unless overwrite is set, empty discovery raises RuntimeError,
+    top-k >= num_images raises ValueError, and existing eval files should stop
+    the run to prevent silent overwrites.
+    """
     input_dir = tmp_path / "input_err"
     input_dir.mkdir()
     out_dir = tmp_path / "out_err"
@@ -294,6 +322,7 @@ def test_cli_errors(monkeypatch, tmp_path):
 
 
 def test_parse_args_defaults(monkeypatch, tmp_path):
+    """Blank --image-exts input should fall back to DEFAULT_EXTS in config."""
     input_dir = tmp_path / "input_parse"
     output_dir = tmp_path / "output_parse"
     input_dir.mkdir()
@@ -312,6 +341,7 @@ def test_parse_args_defaults(monkeypatch, tmp_path):
 
 
 def test_cli_main_module_guard(monkeypatch, tmp_path):
+    """Executing clip_image_similarity.cli via runpy should still complete a run."""
     images = make_images(tmp_path / "input_guard")
     out_dir = tmp_path / "out_guard"
     # Pre-patch embeddings.compute_image_embeddings so the re-executed module uses the stub.
