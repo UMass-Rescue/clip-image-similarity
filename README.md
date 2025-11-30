@@ -2,15 +2,15 @@
 
 [![codecov](https://codecov.io/gh/UMass-Rescue/clip-image-similarity/graph/badge.svg?token=UI639IVPVS)](https://codecov.io/gh/UMass-Rescue/clip-image-similarity) [![Tests](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml/badge.svg)](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml)
 
-CLI and library to embed a folder of images with a CLIP model, compute cosine-similarity distances, and export compact retrieval artifacts (flattened upper-tri arrays or per-image top-k neighbors). Use the outputs directly for series retrieval metrics such as mAP while keeping file paths private when needed.
+*A CLIP-based toolkit for embedding image folders and generating compact pairwise distance matrices for retrieval and evaluation.*
 
 ## Features
 
-- Deterministic image ordering + embeddings for reproducible indices
-- Packed upper-triangular distance arrays for space-efficient storage
-- Optional sparse top-k neighbor export with dtype/index metadata
-- Label anonymization helper that maps sensitive paths to indices
-- Metrics toolkit (`metrics/map.py`) for computing mAP@k from either packed distances or stored neighbors
+* 🔍 **CLIP-based image embedding** (any OpenCLIP model, default is Apple's DFN5B-CLIP-ViT-H-14-384)
+* ⚡ **GPU-accelerated** batch inference
+* 📦 **Compact flattened pairwise distance arrays** (upper-triangular matrix, float32/float16 storage, top-k neighbors)
+* 🔒 **Privacy-preserving** series label anonymization helper
+* 📊 **Mean Average Precision (mAP) computation** from either flattened distances or stored top-k neighbors
 
 ## Quickstart
 
