@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clip-pairwise-eval"
-version = "1.0.0"
-description = "Compute flattened pairwise CLIP image distances for retrieval evaluation."
+version = "1.1.0"
+description = "A CLIP-based toolkit for embedding image folders and generating compact pairwise distance matrices for retrieval and evaluation."
 readme = "README.md"
 authors = [{ name = "Prasanna Lakkur Subramanyam", email = "prasanna.lakkur@gmail.com" }]
 requires-python = ">=3.10"
