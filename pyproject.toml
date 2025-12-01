@@ -8,9 +8,9 @@ version = "1.1.0"
 description = "A CLIP-based toolkit for embedding image folders and generating compact pairwise distance matrices for retrieval and evaluation."
 readme = "README.md"
 authors = [{ name = "Prasanna Lakkur Subramanyam", email = "prasanna.lakkur@gmail.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
-    "torch>=2.2.0,<3.0.0",
+    "torch>=2.8.0,<3.0.0",
     "open_clip_torch>=3.2.0,<4.0.0",
     "pillow>=10.0.0,<11.0.0",
     "tqdm>=4.67.0,<5.0.0",
