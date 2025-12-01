@@ -87,7 +87,7 @@ make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
 | --- | --- |
 | `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with dtype metadata. |
 | `evaluation_results/pairwise_topk.npz` | Emitted when `--top-k` is set; contains per-image neighbor indices/distances plus stored `top_k`, dtype, and index dtype metadata. |
-| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
+| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **DO NOT SHARE IF FILENAMES ARE SENSITIVE.** |
 | `series_to_indices.json` | Optional; only written when `--anonymize-labels` is provided. Maps series -> list of indices for downstream mAP while keeping paths private. |
 | `config.json` | Snapshot of the run configuration. |
 
