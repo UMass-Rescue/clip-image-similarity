@@ -24,18 +24,6 @@
     ANONYMIZE_LABELS=/path/to/labels.json \
     PAIRWISE_DTYPE=float16
   ```
-*OR*
-  ```bash
-  poetry install
-  poetry run clip-pairwise-eval \
-    --input-dir /path/to/images \
-    --output-dir /path/to/output \
-    --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-    --batch-size 16 \
-    --device cuda \
-    --anonymize-labels /path/to/labels.json \
-    --pairwise-dtype float16
-  ```
 
 ## Installation
 
@@ -45,10 +33,19 @@ make install
 source .venv/bin/activate
 ```
 
-**Using Poetry**
+**Running the CLI:**
 ```bash
-poetry install
-poetry shell
+python -m clip_image_similarity.cli \
+  --input-dir /path/to/images \
+  --output-dir /path/to/output \
+  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+  --batch-size 16 \
+  --device cuda
+```
+
+Or use the Makefile wrapper (installs and activates the venv automatically):
+```bash
+make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
 ```
 
 ## Parameters
@@ -65,21 +62,6 @@ poetry shell
 | `--anonymize-labels` | ❌ | None | Path to labels JSON (series → image paths); converts to series → indices. |
 | `--image-exts` | ❌ | Common formats | Comma-separated list of image extensions (e.g., `jpg,png,jpeg`). |
 | `--overwrite` | ❌ | `false` | Allow overwriting existing output files. |
-
-**Running the CLI:**
-```bash
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /path/to/output \
-  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --batch-size 16 \
-  --device cuda
-```
-
-Or use the Makefile wrapper:
-```bash
-make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
-```
 
 ## Outputs
 
