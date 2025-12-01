@@ -3,7 +3,7 @@ VENV := .venv
 PYTHON_BIN := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: venv install run test
+.PHONY: venv install run anonymize-labels test
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -25,6 +25,14 @@ run: install
 		$(if $(TOP_K),--top-k $(TOP_K),) \
 		$(if $(ANONYMIZE_LABELS),--anonymize-labels $(ANONYMIZE_LABELS),) \
 		$(if $(PAIRWISE_DTYPE),--pairwise-dtype $(PAIRWISE_DTYPE),) \
+		$(if $(OVERWRITE),--overwrite,)
+
+anonymize-labels: install
+	@test -n "$(OUTPUT_DIR)" || (echo "OUTPUT_DIR is required" && exit 1)
+	@test -n "$(LABELS)" || (echo "LABELS is required" && exit 1)
+	$(PYTHON_BIN) -m clip_image_similarity.generate_anonymous_labels \
+		--output-dir $(OUTPUT_DIR) \
+		--labels $(LABELS) \
 		$(if $(OVERWRITE),--overwrite,)
 
 test: install

@@ -91,6 +91,24 @@ make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
 | `series_to_indices.json` | Optional; only written when `--anonymize-labels` is provided. Maps series -> list of indices for downstream mAP while keeping paths private. |
 | `config.json` | Snapshot of the run configuration. |
 
+## Generate Anonymous Labels (optional)
+
+If you ran the CLI without `--anonymize-labels` but later want to generate `series_to_indices.json`, you can use the standalone script:
+
+```bash
+make anonymize-labels OUTPUT_DIR=./results LABELS=./path/to/labels.json
+```
+
+Or run directly:
+```bash
+python -m clip_image_similarity.generate_anonymous_labels \
+  --output-dir ./results \
+  --labels ./path/to/labels.json \
+  --overwrite  # optional: overwrite existing series_to_indices.json
+```
+
+This reads `image_paths.json` from the output directory and generates `series_to_indices.json` using your provided labels file.
+
 ## Compute mAP (optional)
 
 After generating results, compute Mean Average Precision from the flattened distances and series indices:
