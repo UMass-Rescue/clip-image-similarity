@@ -135,3 +135,20 @@ python -m metrics.map \
   --image-paths ./results/image_paths.json \
   --output_csv ./results/metrics/map.csv
 ```
+
+## Performance Considerations
+
+### Batch Size
+Start with a small batch size (~16 or 32) and gradually increase while monitoring GPU memory usage. For reference, batch size 256 achieves ~81% VRAM utilization on an RTX 5090 (32GB) when processing 30K images.
+
+### Precision
+Use `--pairwise-dtype float16` to reduce storage size by approximately 50% with negligible impact on retrieval accuracy. The default `float32` provides higher precision but results in larger output files.
+
+### Top-K Mode
+When working with large datasets, consider using `--top-k` to save only the k nearest neighbors per image instead of the full distance matrix *if you want to minimize the size of the output*. This significantly reduces storage requirements when k << total number of images.
+
+**Important:** If you plan to compute mAP later, ensure k is at least as large as the size of the largest series in your labels. Otherwise, some relevant images may be excluded from the evaluation.
+
+## Benchmarks
+
+Performance benchmarks are available in [BENCHMARK.md](BENCHMARK.md), including detailed timing breakdowns, resource usage, and throughput metrics.
