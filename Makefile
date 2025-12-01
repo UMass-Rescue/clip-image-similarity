@@ -23,6 +23,8 @@ run: install
 		$(if $(BATCH_SIZE),--batch-size $(BATCH_SIZE),) \
 		$(if $(DEVICE),--device $(DEVICE),) \
 		$(if $(TOP_K),--top-k $(TOP_K),) \
+		$(if $(ANONYMIZE_LABELS),--anonymize-labels $(ANONYMIZE_LABELS),) \
+		$(if $(PAIRWISE_DTYPE),--pairwise-dtype $(PAIRWISE_DTYPE),) \
 		$(if $(OVERWRITE),--overwrite,)
 
 test: install
