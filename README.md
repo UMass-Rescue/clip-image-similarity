@@ -14,69 +14,82 @@
 
 ## Quickstart
 
-Install dependencies (venv, Poetry, or system) and run the CLI:
   ```bash
-  python -m clip_image_similarity.cli \
+  make run \
+    INPUT_DIR=/path/to/images \
+    OUTPUT_DIR=/path/to/output \
+    MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
+    BATCH_SIZE=16 \
+    DEVICE=cuda \
+    ANONYMIZE_LABELS=/path/to/labels.json \
+    PAIRWISE_DTYPE=float16
+  ```
+*OR*
+  ```bash
+  poetry install
+  poetry run clip-pairwise-eval \
     --input-dir /path/to/images \
-    --output-dir /tmp/clip-results \
+    --output-dir /path/to/output \
     --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
     --batch-size 16 \
-    --device cuda
+    --device cuda \
+    --anonymize-labels /path/to/labels.json \
+    --pairwise-dtype float16
   ```
 
-## How to Run
+## Installation
 
-**Option 1: Makefile (auto-creates venv and installs deps)**
+**Using Makefile** (auto-creates venv and installs dependencies)
 ```bash
-make run \
-  INPUT_DIR=/path/to/images \
-  OUTPUT_DIR=/tmp/clip-results \
-  MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  BATCH_SIZE=16 \
-  DEVICE=cuda \
-  TOP_K=1000 \
-  OVERWRITE=1
-```
-
-**Option 2: Create venv with Makefile, then run Python manually**
-```bash
-make install                     # sets up .venv and installs requirements
+make install
 source .venv/bin/activate
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /tmp/clip-results \
-  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --batch-size 16 \
-  --device cuda \
-  --top-k 1000  # optional: save per-image top-k neighbors instead of full flattened distances
-# OR
-python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results_3 --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 --batch-size 16 
 ```
 
-**Option 3: Poetry**
+**Using Poetry**
 ```bash
 poetry install
-poetry run clip-pairwise-eval \
+poetry shell
+```
+
+## Parameters
+
+| Parameter | Required | Default | Description |
+| --- | --- | --- | --- |
+| `--input-dir`, `-i` | ✅ | - | Root directory containing images to process. |
+| `--output-dir`, `-o` | ✅ | - | Directory where results will be written. |
+| `--model`, `-m` | ❌ | `hf-hub:apple/DFN5B-CLIP-ViT-H-14-384` | Hugging Face Hub model ID for OpenCLIP. |
+| `--batch-size`, `-b` | ❌ | `32` | Batch size for embedding computation. |
+| `--device`, `-d` | ❌ | Auto (CUDA if available) | Device to run on (e.g., `cuda`, `cuda:0`, `cpu`). |
+| `--pairwise-dtype` | ❌ | `float32` | Numeric precision for storing distances (`float32` or `float16`). |
+| `--top-k` | ❌ | None | Save top-k neighbors per image instead of full flattened distances. |
+| `--anonymize-labels` | ❌ | None | Path to labels JSON (series → image paths); converts to series → indices. |
+| `--image-exts` | ❌ | Common formats | Comma-separated list of image extensions (e.g., `jpg,png,jpeg`). |
+| `--overwrite` | ❌ | `false` | Allow overwriting existing output files. |
+
+**Running the CLI:**
+```bash
+python -m clip_image_similarity.cli \
   --input-dir /path/to/images \
-  --output-dir /tmp/clip-results \
+  --output-dir /path/to/output \
   --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --device cpu \
-  --top-k 1000
-# OR
-poetry run python -m clip_image_similarity.cli --input-dir ./resources/images --output-dir ./results --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384
+  --batch-size 16 \
+  --device cuda
+```
+
+Or use the Makefile wrapper:
+```bash
+make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
 ```
 
 ## Outputs
 
 | File | Description |
 | --- | --- |
-| `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with `allow_pickle=False` and dtype metadata. |
+| `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with dtype metadata. |
 | `evaluation_results/pairwise_topk.npz` | Emitted when `--top-k` is set; contains per-image neighbor indices/distances plus stored `top_k`, dtype, and index dtype metadata. |
 | `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
 | `series_to_indices.json` | Optional; only written when `--anonymize-labels` is provided. Maps series -> list of indices for downstream mAP while keeping paths private. |
-| `config.json` | Snapshot of the run configuration for auditing/repro. |
-
-Progress bars and timestamped logs show progress through discovery, embedding, and distance calculation.
+| `config.json` | Snapshot of the run configuration. |
 
 ## Compute mAP (optional)
 
