@@ -19,3 +19,12 @@ dependencies = [
 
 [project.scripts]
 clip-pairwise-eval = "clip_image_similarity.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["clip_image_similarity*"]
+
+[tool.poetry]
+packages = [
+    { include = "clip_image_similarity" },
+]
