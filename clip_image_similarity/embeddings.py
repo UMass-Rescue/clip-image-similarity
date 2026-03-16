@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import torch
 from PIL import Image
@@ -12,10 +12,18 @@ from .utils import batched, log, plural
 
 
 class ClipEmbedder:
-    def __init__(self, model_id: str, device: str):
+    def __init__(
+        self,
+        model_id: str,
+        device: str,
+        pretrained: Optional[str] = None,
+        checkpoint_path: Optional[Path] = None,
+    ):
         """Construct a ClipEmbedder bound to a model id and device."""
         self.model_id = model_id
         self.device = device
+        self.pretrained = pretrained
+        self.checkpoint_path = checkpoint_path
         self.model, self.preprocess = self._load_model()
 
     def _load_model(self):
@@ -25,8 +33,21 @@ class ClipEmbedder:
             Tuple of (model, preprocess transform).
         """
         log(f"Loading model '{self.model_id}' on {self.device}...")
-        model, preprocess = open_clip.create_model_from_pretrained(self.model_id)
-        model.to(self.device)
+        if self.pretrained:
+            model, preprocess = open_clip.create_model_from_pretrained(
+                self.model_id,
+                pretrained=self.pretrained,
+                device=self.device,
+            )
+        else:
+            model, preprocess = open_clip.create_model_from_pretrained(self.model_id)
+            model.to(self.device)
+
+        if self.checkpoint_path:
+            log(f"Loading checkpoint from {self.checkpoint_path}...")
+            open_clip.load_checkpoint(model, str(self.checkpoint_path))
+            model.to(self.device)
+
         model.eval()
         log("Model ready for inference.")
         return model, preprocess
@@ -82,7 +103,12 @@ class ClipEmbedder:
 
 
 def compute_image_embeddings(
-    image_paths: List[Path], model_id: str, device: str, batch_size: int
+    image_paths: List[Path],
+    model_id: str,
+    device: str,
+    batch_size: int,
+    pretrained: Optional[str] = None,
+    checkpoint_path: Optional[Path] = None,
 ) -> torch.Tensor:
     """Compute embeddings for image_paths with the specified model id.
 
@@ -91,10 +117,17 @@ def compute_image_embeddings(
         model_id: HF Hub model identifier for OpenCLIP.
         device: Device string such as 'cuda' or 'cpu'.
         batch_size: Batch size for encoding.
+        pretrained: Optional OpenCLIP pretrained identifier.
+        checkpoint_path: Optional local checkpoint loaded after model creation.
     Returns:
         CPU tensor containing embeddings for all images in order.
     """
-    embedder = ClipEmbedder(model_id=model_id, device=device)
+    embedder = ClipEmbedder(
+        model_id=model_id,
+        device=device,
+        pretrained=pretrained,
+        checkpoint_path=checkpoint_path,
+    )
     try:
         return embedder.embed_paths(image_paths=image_paths, batch_size=batch_size)
     finally:

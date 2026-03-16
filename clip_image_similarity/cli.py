@@ -48,6 +48,16 @@ def parse_args_to_config() -> RunConfig:
         help="Hugging Face Hub model id for OpenCLIP (e.g. hf-hub:apple/DFN5B-CLIP-ViT-H-14-384).",
     )
     parser.add_argument(
+        "--pretrained",
+        default=None,
+        help="Optional OpenCLIP pretrained identifier to use when creating the model.",
+    )
+    parser.add_argument(
+        "--checkpoint_path",
+        default=None,
+        help="Optional local checkpoint to load after model creation.",
+    )
+    parser.add_argument(
         "--batch-size",
         "-b",
         type=int,
@@ -104,6 +114,9 @@ def parse_args_to_config() -> RunConfig:
     labels_path = (
         Path(args.anonymize_labels).resolve() if args.anonymize_labels else None
     )
+    checkpoint_path = (
+        Path(args.checkpoint_path).resolve() if args.checkpoint_path else None
+    )
 
     return RunConfig(
         input_dir=input_dir,
@@ -112,6 +125,8 @@ def parse_args_to_config() -> RunConfig:
         batch_size=args.batch_size,
         device=device,
         image_exts=image_exts,
+        pretrained=args.pretrained,
+        checkpoint_path=checkpoint_path,
         pairwise_dtype=args.pairwise_dtype,
         top_k=args.top_k,
         labels_path=labels_path,
@@ -128,6 +143,11 @@ def run(config: RunConfig) -> None:
     if config.labels_path and not config.labels_path.is_file():
         raise FileNotFoundError(
             f"Labels file not found at --anonymize-labels path: {config.labels_path}"
+        )
+    if config.checkpoint_path and not config.checkpoint_path.is_file():
+        raise FileNotFoundError(
+            "Checkpoint file not found at --checkpoint_path path: "
+            f"{config.checkpoint_path}"
         )
     if config.output_dir.exists() and not config.overwrite:
         raise FileExistsError(
@@ -154,12 +174,18 @@ def run(config: RunConfig) -> None:
             f"--top-k must be less than the number of images ({len(image_paths)}); got {config.top_k}."
         )
 
-    embeddings = compute_image_embeddings(
-        image_paths=image_paths,
-        model_id=config.model_id,
-        device=config.device,
-        batch_size=config.batch_size,
-    )
+    embedder_kwargs = {
+        "image_paths": image_paths,
+        "model_id": config.model_id,
+        "device": config.device,
+        "batch_size": config.batch_size,
+    }
+    if config.pretrained is not None:
+        embedder_kwargs["pretrained"] = config.pretrained
+    if config.checkpoint_path is not None:
+        embedder_kwargs["checkpoint_path"] = config.checkpoint_path
+
+    embeddings = compute_image_embeddings(**embedder_kwargs)
 
     computer = SimilarityComputer(device=config.device)
     sim = computer.cosine_similarity_matrix(embeddings, dtype=torch.float32)

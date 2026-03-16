@@ -47,6 +47,8 @@ class RunConfig:
     batch_size: int
     device: str
     image_exts: Tuple[str, ...]
+    pretrained: Optional[str] = None
+    checkpoint_path: Optional[Path] = None
     pairwise_dtype: str = "float32"  # float32|float16 for storage
     top_k: Optional[int] = None  # optional top-k sparse output
     labels_path: Optional[Path] = None  # optional labels to map to indices
@@ -64,6 +66,8 @@ class RunConfig:
             raise ValueError("top_k must be positive if provided")
         if self.labels_path:
             self.labels_path = self.labels_path.resolve()
+        if self.checkpoint_path:
+            self.checkpoint_path = self.checkpoint_path.resolve()
 
     def ensure_output_dir(self) -> None:
         """Create the output directory and parents if they don't exist."""
