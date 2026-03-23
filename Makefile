@@ -20,6 +20,8 @@ run: install
 		--input-dir $(INPUT_DIR) \
 		--output-dir $(OUTPUT_DIR) \
 		--model $(MODEL) \
+		$(if $(PRETRAINED),--pretrained $(PRETRAINED),) \
+		$(if $(CHECKPOINT_PATH),--checkpoint_path $(CHECKPOINT_PATH),) \
 		$(if $(BATCH_SIZE),--batch-size $(BATCH_SIZE),) \
 		$(if $(DEVICE),--device $(DEVICE),) \
 		$(if $(TOP_K),--top-k $(TOP_K),) \

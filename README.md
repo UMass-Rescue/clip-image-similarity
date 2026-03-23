@@ -43,6 +43,20 @@ python -m clip_image_similarity.cli \
   --device cuda
 ```
 
+**Loading a fine-tuned OpenCLIP checkpoint:**
+```bash
+python -m clip_image_similarity.cli \
+  --input-dir /path/to/images \
+  --output-dir /path/to/output \
+  --model ViT-H-14-378-quickgelu \
+  --pretrained dfn5b \
+  --checkpoint_path /path/to/checkpoints/epoch_4.pt \
+  --batch-size 16 \
+  --device cuda
+```
+
+Use the exact training-time `--model` and `--pretrained` values when recreating a fine-tuned model. If `--checkpoint_path` is provided, the CLI loads that checkpoint after creating the base model.
+
 Or use the Makefile wrapper (installs and activates the venv automatically):
 ```bash
 make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
@@ -54,7 +68,9 @@ make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
 | --- | --- | --- | --- |
 | `--input-dir`, `-i` | ✅ | - | Root directory containing images to process. |
 | `--output-dir`, `-o` | ✅ | - | Directory where results will be written. |
-| `--model`, `-m` | ❌ | `hf-hub:apple/DFN5B-CLIP-ViT-H-14-384` | Hugging Face Hub model ID for OpenCLIP. |
+| `--model`, `-m` | ❌ | `hf-hub:apple/DFN5B-CLIP-ViT-H-14-384` | OpenCLIP model identifier. Use the training-time model name when combining with `--pretrained`. |
+| `--pretrained` | ❌ | None | Optional OpenCLIP pretrained weights identifier used when creating the model. |
+| `--checkpoint_path` | ❌ | None | Optional local checkpoint loaded after model creation for fine-tuned models. |
 | `--batch-size`, `-b` | ❌ | `32` | Batch size for embedding computation. |
 | `--device`, `-d` | ❌ | Auto (CUDA if available) | Device to run on (e.g., `cuda`, `cuda:0`, `cpu`). |
 | `--pairwise-dtype` | ❌ | `float32` | Numeric precision for storing distances (`float32` or `float16`). |
