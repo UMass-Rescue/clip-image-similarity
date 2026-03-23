@@ -263,6 +263,18 @@ def test_cli_errors(monkeypatch, tmp_path):
     with pytest.raises(FileNotFoundError):
         cli.run(cfg)
 
+    cfg_missing_checkpoint = RunConfig(
+        input_dir=input_dir,
+        output_dir=out_dir,
+        model_id="mock",
+        batch_size=1,
+        device="cpu",
+        image_exts=(".png",),
+        checkpoint_path=tmp_path / "missing.pt",
+    )
+    with pytest.raises(FileNotFoundError):
+        cli.run(cfg_missing_checkpoint)
+
     out_dir.mkdir()
     cfg_no_overwrite = RunConfig(
         input_dir=input_dir,
@@ -342,6 +354,84 @@ def test_parse_args_defaults(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", argv)
     cfg = cli.parse_args_to_config()
     assert cfg.image_exts == cli.DEFAULT_EXTS
+
+
+def test_parse_args_loader_options(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input_parse_loader"
+    output_dir = tmp_path / "output_parse_loader"
+    checkpoint_path = tmp_path / "epoch_4.pt"
+    input_dir.mkdir()
+    checkpoint_path.touch()
+    argv = [
+        "prog",
+        "--input-dir",
+        str(input_dir),
+        "--output-dir",
+        str(output_dir),
+        "--model",
+        "ViT-H-14-378-quickgelu",
+        "--pretrained",
+        "dfn5b",
+        "--checkpoint_path",
+        str(checkpoint_path),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    cfg = cli.parse_args_to_config()
+
+    assert cfg.model_id == "ViT-H-14-378-quickgelu"
+    assert cfg.pretrained == "dfn5b"
+    assert cfg.checkpoint_path == checkpoint_path.resolve()
+
+
+def test_cli_run_forwards_loader_options(monkeypatch, tmp_path):
+    images = make_images(tmp_path / "input_loader")
+    checkpoint_path = tmp_path / "epoch_4.pt"
+    checkpoint_path.touch()
+    captured = {}
+
+    def fake_compute_image_embeddings(
+        image_paths,
+        model_id,
+        device,
+        batch_size,
+        pretrained=None,
+        checkpoint_path=None,
+    ):
+        captured.update(
+            image_paths=image_paths,
+            model_id=model_id,
+            device=device,
+            batch_size=batch_size,
+            pretrained=pretrained,
+            checkpoint_path=checkpoint_path,
+        )
+        return torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+
+    monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
+    monkeypatch.setattr(cli, "compute_image_embeddings", fake_compute_image_embeddings)
+    monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
+
+    cfg = RunConfig(
+        input_dir=tmp_path / "input_loader",
+        output_dir=tmp_path / "out_loader",
+        model_id="ViT-H-14-378-quickgelu",
+        batch_size=2,
+        device="cpu",
+        image_exts=(".png",),
+        pretrained="dfn5b",
+        checkpoint_path=checkpoint_path,
+        overwrite=True,
+    )
+
+    cli.run(cfg)
+
+    assert captured["model_id"] == "ViT-H-14-378-quickgelu"
+    assert captured["pretrained"] == "dfn5b"
+    assert captured["checkpoint_path"] == checkpoint_path.resolve()
+    assert captured["device"] == "cpu"
+    assert captured["batch_size"] == 2
+    assert captured["image_paths"] == images
 
 
 def test_cli_main_module_guard(monkeypatch, tmp_path):

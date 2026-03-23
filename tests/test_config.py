@@ -25,6 +25,8 @@ def test_runconfig_normalizes_fields(tmp_path):
     output_dir = tmp_path / "out"
     labels = tmp_path / "labels.json"
     labels.touch()
+    checkpoint = tmp_path / "epoch_4.pt"
+    checkpoint.touch()
 
     cfg = RunConfig(
         input_dir=input_dir,
@@ -33,6 +35,8 @@ def test_runconfig_normalizes_fields(tmp_path):
         batch_size=8,
         device="cpu",
         image_exts=(".JPG", "png"),
+        pretrained="dfn5b",
+        checkpoint_path=checkpoint,
         pairwise_dtype="FLOAT16",
         top_k=5,
         labels_path=labels,
@@ -42,6 +46,8 @@ def test_runconfig_normalizes_fields(tmp_path):
     assert cfg.input_dir == input_dir
     assert cfg.output_dir == output_dir.resolve()
     assert cfg.image_exts == (".jpg", ".png")
+    assert cfg.pretrained == "dfn5b"
+    assert cfg.checkpoint_path == checkpoint.resolve()
     assert cfg.pairwise_dtype == "float16"
     assert cfg.top_k == 5
     assert cfg.labels_path == labels.resolve()

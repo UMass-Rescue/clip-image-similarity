@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-import pytest
 import torch
 from PIL import Image
 
@@ -11,6 +10,7 @@ from clip_image_similarity.embeddings import ClipEmbedder, compute_image_embeddi
 class DummyModel:
     def __init__(self):
         self.moved_to = None
+        self.eval_called = False
 
     def encode_image(self, batch: torch.Tensor) -> torch.Tensor:
         return batch * 2
@@ -20,6 +20,7 @@ class DummyModel:
         return self
 
     def eval(self):
+        self.eval_called = True
         return self
 
 
@@ -68,3 +69,39 @@ def test_clip_embedder_cleanup_calls_cuda_empty_cache(monkeypatch):
     embedder.device = "cuda:0"
     embedder.cleanup()
     assert called["empty_cache"] is True
+
+
+def test_clip_embedder_uses_pretrained_and_checkpoint(monkeypatch, tmp_path):
+    calls = {"create": None, "checkpoint": None}
+
+    def fake_create_model_from_pretrained(*args, **kwargs):
+        calls["create"] = (args, kwargs)
+        return DummyModel(), dummy_preprocess
+
+    def fake_load_checkpoint(model, checkpoint_path):
+        calls["checkpoint"] = checkpoint_path
+
+    monkeypatch.setattr(
+        "clip_image_similarity.embeddings.open_clip.create_model_from_pretrained",
+        fake_create_model_from_pretrained,
+    )
+    monkeypatch.setattr(
+        "clip_image_similarity.embeddings.open_clip.load_checkpoint",
+        fake_load_checkpoint,
+    )
+
+    checkpoint_path = tmp_path / "epoch_4.pt"
+    embedder = ClipEmbedder(
+        model_id="mock",
+        device="cpu",
+        pretrained="dfn5b",
+        checkpoint_path=checkpoint_path,
+    )
+
+    assert calls["create"] == (
+        ("mock",),
+        {"pretrained": "dfn5b", "device": "cpu"},
+    )
+    assert calls["checkpoint"] == str(checkpoint_path)
+    assert embedder.model.moved_to == "cpu"
+    assert embedder.model.eval_called is True
