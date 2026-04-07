@@ -388,8 +388,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-y",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use a log scale on the y-axis (default: enabled). Use --no-log-y to disable.",
+        default=False,
+        help="Use a log scale on the y-axis (default: disabled). Use --log-y to enable.",
     )
     parser.add_argument(
         "--save-similarity-samples",
