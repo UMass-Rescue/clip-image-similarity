@@ -2,180 +2,250 @@
 
 [![codecov](https://codecov.io/gh/UMass-Rescue/clip-image-similarity/graph/badge.svg?token=UI639IVPVS)](https://codecov.io/gh/UMass-Rescue/clip-image-similarity) [![Tests](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml/badge.svg)](https://github.com/UMass-Rescue/clip-image-similarity/actions/workflows/tests.yml)
 
-*A CLIP-based toolkit for embedding image folders and generating compact pairwise distance matrices for retrieval and evaluation.*
+*A CLIP-based toolkit for embedding image folders, computing pairwise distances, and evaluating image-series retrieval.*
 
 ## Features
 
-* 🔍 **CLIP-based image embedding** (any OpenCLIP model, default is Apple's DFN5B-CLIP-ViT-H-14-384)
-* ⚡ **GPU-accelerated** batch inference
-* 📦 **Compact flattened pairwise distance arrays** (upper-triangular matrix, float32/float16 storage, top-k neighbors)
-* 🔒 **Privacy-preserving** series label anonymization helper
-* 📊 **Mean Average Precision (mAP) computation** from either flattened distances or stored top-k neighbors
-
-## Quickstart
-
-  ```bash
-  make run \
-    INPUT_DIR=/path/to/images \
-    OUTPUT_DIR=/path/to/output \
-    MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-    BATCH_SIZE=16 \
-    DEVICE=cuda \
-    ANONYMIZE_LABELS=/path/to/labels.json \
-    PAIRWISE_DTYPE=float16
-  ```
+* **CLIP-based image embedding** with any OpenCLIP model (default: Apple's `DFN5B-CLIP-ViT-H-14-384`), with support for fine-tuned checkpoints.
+* **GPU-accelerated** batch inference.
+* **Compact pairwise distance storage**: flattened upper-triangular matrix in `float32`/`float16`, or per-image top-k neighbors.
+* **Privacy-preserving** label anonymization (series → image-index mapping that hides filenames).
+* **Retrieval metrics**: mean Average Precision (mAP@k), Precision@k, Recall@k — dataset-wide and per-series.
+* **Distance distribution analysis**: within-series vs out-of-series histograms, with optional rendered image-pair samples grouped by similarity percentile.
+* **Series cleanup tools**: filter out outlier images using mean within-series and out-of-series distance thresholds.
 
 ## Installation
 
-**Using Makefile** (auto-creates venv and installs dependencies)
+`make install` creates a local `.venv/` and installs all dependencies:
+
 ```bash
 make install
+```
+
+`make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–5 below) directly:
+
+```bash
 source .venv/bin/activate
 ```
 
-**Running the CLI:**
+## Tests
+
 ```bash
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /path/to/output \
-  --model hf-hub:apple/DFN5B-CLIP-ViT-H-14-384 \
-  --batch-size 16 \
-  --device cuda
+make test
 ```
 
-**Loading a fine-tuned OpenCLIP checkpoint:**
-```bash
-python -m clip_image_similarity.cli \
-  --input-dir /path/to/images \
-  --output-dir /path/to/output \
-  --model ViT-H-14-378-quickgelu \
-  --pretrained dfn5b \
-  --checkpoint_path /path/to/checkpoints/epoch_4.pt \
-  --batch-size 16 \
-  --device cuda
+Runs the `pytest` suite with coverage over `clip_image_similarity` and `metrics`.
+
+## Pipeline overview
+
+```
+labels.json + /path/to/images
+        │
+        ▼
+   make run                   ──▶  pairwise_distances.npz
+   (embeds + anonymizes             image_paths.json
+    in one step)                    series_to_indices.json
+                                            │
+                                            ├──▶ metrics.map                         (mAP@k CSV)
+                                            ├──▶ metrics.precision_recall_plot       (P@k / R@k curves)
+                                            ├──▶ metrics.distance_histogram          (histograms + sample renders)
+                                            └──▶ scripts.filter_series_by_avg_distance  (cleanup)
 ```
 
-Use the exact training-time `--model` and `--pretrained` values when recreating a fine-tuned model. If `--checkpoint_path` is provided, the CLI loads that checkpoint after creating the base model.
+## 1. Compute pairwise distances (`make run`)
 
-Or use the Makefile wrapper (installs and activates the venv automatically):
+`make run` embeds every image under `INPUT_DIR`, writes pairwise distances under `OUTPUT_DIR`, and — when `ANONYMIZE_LABELS` is set — also writes the index-mapped `series_to_indices.json` required by every downstream metric.
+
+**Default path (recommended):**
+
 ```bash
-make run INPUT_DIR=/path/to/images OUTPUT_DIR=/path/to/output
+make run \
+  INPUT_DIR=/path/to/images \
+  OUTPUT_DIR=./out/run1 \
+  MODEL="ViT-H-14-378-quickgelu" \
+  PRETRAINED=dfn5b \
+  ANONYMIZE_LABELS=/path/to/labels.json \
+  BATCH_SIZE=64 \
+  DEVICE=cuda \
+  PAIRWISE_DTYPE=float16
 ```
 
-## Parameters
+**Fine-tuned checkpoint** — same as above plus `CHECKPOINT_PATH` (use the same `MODEL` / `PRETRAINED` that the checkpoint was trained against):
 
-| Parameter | Required | Default | Description |
+```bash
+make run \
+  INPUT_DIR=/path/to/images \
+  OUTPUT_DIR=./out/run1_finetuned \
+  MODEL="ViT-H-14-378-quickgelu" \
+  PRETRAINED=dfn5b \
+  CHECKPOINT_PATH=/path/to/checkpoints/epoch_27.pt \
+  ANONYMIZE_LABELS=/path/to/labels.json \
+  BATCH_SIZE=64 \
+  DEVICE=cuda \
+  PAIRWISE_DTYPE=float16
+```
+
+`labels.json` is a JSON object `{ series_name: [image_path, ...] }`. Paths are matched against the images discovered under `INPUT_DIR`.
+
+### `make run` variables
+
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `--input-dir`, `-i` | ✅ | - | Root directory containing images to process. |
-| `--output-dir`, `-o` | ✅ | - | Directory where results will be written. |
-| `--model`, `-m` | ❌ | `hf-hub:apple/DFN5B-CLIP-ViT-H-14-384` | OpenCLIP model identifier. Use the training-time model name when combining with `--pretrained`. |
-| `--pretrained` | ❌ | None | Optional OpenCLIP pretrained weights identifier used when creating the model. |
-| `--checkpoint_path` | ❌ | None | Optional local checkpoint loaded after model creation for fine-tuned models. |
-| `--batch-size`, `-b` | ❌ | `32` | Batch size for embedding computation. |
-| `--device`, `-d` | ❌ | Auto (CUDA if available) | Device to run on (e.g., `cuda`, `cuda:0`, `cpu`). |
-| `--pairwise-dtype` | ❌ | `float32` | Numeric precision for storing distances (`float32` or `float16`). |
-| `--top-k` | ❌ | None | Save top-k neighbors per image instead of full flattened distances. |
-| `--anonymize-labels` | ❌ | None | Path to labels JSON (series → image paths); converts to series → indices. |
-| `--image-exts` | ❌ | Common formats | Comma-separated list of image extensions (e.g., `jpg,png,jpeg`). |
-| `--overwrite` | ❌ | `false` | Allow overwriting existing output files. |
+| `INPUT_DIR` | yes | — | Root directory containing images (searched recursively). |
+| `OUTPUT_DIR` | yes | — | Directory where results will be written. |
+| `MODEL` | yes | — | OpenCLIP model id. Use the training-time name when combining with `PRETRAINED`/`CHECKPOINT_PATH`. For a quick start without fine-tuning, `MODEL=hf-hub:apple/DFN5B-CLIP-ViT-H-14-384` is a good default and does not require `PRETRAINED`. |
+| `PRETRAINED` | no | none | OpenCLIP pretrained-weights identifier, e.g. `dfn5b`. |
+| `CHECKPOINT_PATH` | no | none | Local checkpoint loaded after model creation, for fine-tuned models. |
+| `BATCH_SIZE` | no | `32` | Batch size for embedding computation. |
+| `DEVICE` | no | auto (CUDA if available) | `cuda`, `cuda:0`, `cpu`, etc. |
+| `PAIRWISE_DTYPE` | no | `float32` | Storage precision: `float32` or `float16`. |
+| `TOP_K` | no | none | Save only the top-k neighbors per image instead of the full distance matrix. |
+| `ANONYMIZE_LABELS` | no | none | Path to `labels.json`; produces `series_to_indices.json`. Strongly recommended — required by every downstream metric script. |
+| `OVERWRITE` | no | unset | Set to any non-empty value to allow overwriting existing output files. |
 
-## Outputs
+### Outputs of `make run`
 
 | File | Description |
 | --- | --- |
-| `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`; dtype `float32` (default) or `float16` via `--pairwise-dtype`, saved with dtype metadata. |
-| `evaluation_results/pairwise_topk.npz` | Emitted when `--top-k` is set; contains per-image neighbor indices/distances plus stored `top_k`, dtype, and index dtype metadata. |
-| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **DO NOT SHARE IF FILENAMES ARE SENSITIVE.** |
-| `series_to_indices.json` | Optional; only written when `--anonymize-labels` is provided. Maps series -> list of indices for downstream mAP while keeping paths private. |
+| `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`. dtype controlled by `PAIRWISE_DTYPE`. Written when `TOP_K` is *not* set. |
+| `evaluation_results/pairwise_topk.npz` | Per-image top-k neighbor indices/distances. Written when `TOP_K` is set, in place of `pairwise_distances.npz`. |
+| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
+| `series_to_indices.json` | Written when `ANONYMIZE_LABELS` is set. Maps series → indices for downstream evaluation while keeping paths private. |
 | `config.json` | Snapshot of the run configuration. |
+| `run.log` | Log of the run. |
 
-## Generate Anonymous Labels (optional)
+> If you forgot to pass `ANONYMIZE_LABELS` to `make run`, you can generate `series_to_indices.json` after the fact with `make anonymize-labels OUTPUT_DIR=./out/run1 LABELS=/path/to/labels.json` (add `OVERWRITE=1` to replace an existing file).
 
-If you ran the CLI without `--anonymize-labels` but later want to generate `series_to_indices.json`, you can use the standalone script:
+## 2. Compute mAP
 
-```bash
-make anonymize-labels OUTPUT_DIR=./results LABELS=./path/to/labels.json
-```
+`metrics.map` produces per-series and mean mAP@k from the pairwise distances and the anonymized labels:
 
-Or run directly:
-```bash
-python -m clip_image_similarity.generate_anonymous_labels \
-  --output-dir ./results \
-  --labels ./path/to/labels.json \
-  --overwrite  # optional: overwrite existing series_to_indices.json
-```
-
-This reads `image_paths.json` from the output directory and generates `series_to_indices.json` using your provided labels file.
-
-## Compute mAP (optional)
-
-After generating results, compute Mean Average Precision from the flattened distances and series indices:
 ```bash
 python -m metrics.map \
-  --distances ./output2/evaluation_results/pairwise_distances.npz \
-  --series-indices ./output2/series_to_indices.json \
-  --output_csv ./output2/metrics/map.csv
+  --distances ./out/run1/evaluation_results/pairwise_distances.npz \
+  --series-indices ./out/run1/series_to_indices.json \
+  --output_csv ./out/run1/metrics/map.csv
 ```
 
-If you saved top-k neighbors instead of the full flattened distances:
+**With top-k neighbors** (only valid if you ran with `TOP_K`):
+
 ```bash
 python -m metrics.map \
-  --topk ./results/evaluation_results/pairwise_topk.npz \
-  --series-indices ./results/series_to_indices.json \
-  --output_csv ./results/metrics/map.csv
+  --topk ./out/run1/evaluation_results/pairwise_topk.npz \
+  --series-indices ./out/run1/series_to_indices.json \
+  --output_csv ./out/run1/metrics/map.csv
 ```
 
-If you need to derive indices from labels and paths locally instead, provide `--labels` and `--image-paths` to `metrics/map.py` (using the saved `image_paths.json`), but be aware that sharing paths reveals filenames:
+> `TOP_K` must be at least `largest_series_size - 1`, otherwise positives are missed and the script raises an error. Either re-run `make run` with a larger `TOP_K`, or use the full `pairwise_distances.npz` (don't set `TOP_K`).
+
+Add `--labeled-images-only` to restrict the candidate pool to the union of labeled images instead of every image in the matrix.
+
+## 3. Plot Precision@k and Recall@k curves
+
+`metrics.precision_recall_plot` produces precision/recall curves and a precision-vs-recall plot, both dataset-wide and one per series:
+
 ```bash
-python -m metrics.map \
-  --distances ./results/evaluation_results/pairwise_distances.npz \
-  --labels ./resources/labels/images_series_labels.json \
-  --image-paths ./results/image_paths.json \
-  --output_csv ./results/metrics/map.csv
+python -m metrics.precision_recall_plot \
+  --pairwise-output-dir ./out/run1
 ```
 
-## Plot distance histograms (optional)
+### Options
 
-To visualize the distribution of cosine distances **within series** vs **out of series**, run:
+| Flag | Description |
+| --- | --- |
+| `--max-predictions N` | Maximum k to evaluate (inclusive). Defaults to `N-1`. |
+| `--steps S` | Step size between consecutive k values (default `1`). Mutually exclusive with `--num-k`. |
+| `--num-k K` | Sample roughly K log-spaced k values between 1 and `--max-predictions`. Useful for very large matrices. |
+
+### Outputs
+
+```
+<OUTPUT_DIR>/graphs/precision_recall_<timestamp>/
+├── all_series.png                          # P and R vs k (dataset-level)
+├── all_series_precision_vs_recall.png      # P vs R curve (dataset-level)
+└── series/
+    └── <series_name>.png                   # one P/R-vs-k plot per series
+```
+
+This script requires `evaluation_results/pairwise_distances.npz` and `series_to_indices.json`. Top-k input is **not** supported here.
+
+## 4. Plot distance histograms (and optional sample renderings)
+
+`metrics.distance_histogram` plots overlayed histograms of cosine distances **within series** vs **out-of-series**, and can optionally render representative image-pair samples grouped into similarity-percentile bins.
+
+Minimal:
 
 ```bash
 python -m metrics.distance_histogram \
-  --pairwise-output-dir ./output
+  --pairwise-output-dir ./out/run1
 ```
 
-This script expects the standard `clip_image_similarity.cli` outputs under the directory:
-- `evaluation_results/pairwise_distances.npz`
-- `series_to_indices.json`
-
-By default, out-of-series distances are computed against **all other images** in the pairwise matrix. To restrict out-of-series to labeled images only (union of `series_to_indices.json`), add:
+Finer bins, density normalization, plus similarity samples:
 
 ```bash
 python -m metrics.distance_histogram \
-  --pairwise-output-dir ./output \
-  --labeled-images-only
+  --pairwise-output-dir ./out/run1 \
+  --bins 500 \
+  --range-max 1.0 \
+  --density \
+  --save-similarity-samples \
+  --samples-per-bin 5 \
+  --num-percentile-bins 20
 ```
 
-To also save the raw values used to plot each histogram:
+### Options
+
+| Flag | Description |
+| --- | --- |
+| `--bins N` | Number of equal-width histogram bins (default `100`). |
+| `--range-min` / `--range-max` | Distance range to plot (defaults `0.0` / `2.0`). |
+| `--density` | Plot probability density instead of counts. |
+| `--log-y` | Use a log y-axis. |
+| `--labeled-images-only` | Restrict out-of-series candidates to the union of labeled images instead of every other image. |
+| `--save-raw-values` | Also save the raw within/out-of-series distance arrays per series under `raw_values/<series>.npz`. |
+| `--save-similarity-samples` | Render image-pair PNGs grouped by similarity percentile, with manifests. |
+| `--samples-per-bin N` | Max image pairs to render per percentile bin (default `3`, with `--save-similarity-samples`). |
+| `--num-percentile-bins N` | Number of percentile bins per pool (default `10`, with `--save-similarity-samples`). |
+
+Histogram PNGs are written under `<OUTPUT_DIR>/graphs/distance_histogram_<timestamp>/`. Sample renderings (when enabled) are written under `<OUTPUT_DIR>/similarity_samples/<timestamp>/{within_series,out_of_series}/pct_<lo>_<hi>/`.
+
+## 5. Filter series by average distance
+
+`scripts.filter_series_by_avg_distance` cleans up noisy series labels: for each labeled image it computes the mean within-series and mean out-of-series distance, and drops images whose mean within-series distance is too high or whose mean out-of-series distance is too low. Series that end up with fewer than 2 retained images are dropped.
 
 ```bash
-python -m metrics.distance_histogram \
-  --pairwise-output-dir ./output \
-  --save-raw-values
+python -m scripts.filter_series_by_avg_distance \
+  --pairwise-output-dir ./out/run1 \
+  --in-series-threshold 0.35 \
+  --out-of-series-threshold 0.55
 ```
 
-## Performance Considerations
+The script writes a new sub-directory under `OUTPUT_DIR`, named after the thresholds (e.g. `filtered_series_by_avg_distance_in_t0_35_out_t0_55/`), containing:
 
-### Batch Size
-Start with a small batch size (~16 or 32) and gradually increase while monitoring GPU memory usage. For reference, batch size 256 achieves ~81% VRAM utilization on an RTX 5090 (32GB) when processing 30K images.
+* `series_to_indices.json` — filtered series → indices. Drop-in replacement for downstream metrics: point any of the metric scripts above at this directory by passing it as `--pairwise-output-dir`, or by passing the file directly to `--series-indices` for `metrics.map`.
+* `series_to_image_paths.json` — same data but as series → image paths.
+
+A summary of what was kept vs. removed is logged to stdout.
+
+## Performance considerations
+
+### Batch size
+
+Start small (`BATCH_SIZE=16` or `32`) and scale up while watching GPU memory. For reference, `BATCH_SIZE=256` reaches ~81% VRAM utilization on an RTX 5090 (32 GB) embedding 30K images.
 
 ### Precision
-Use `--pairwise-dtype float16` to reduce storage size by approximately 50% with negligible impact on retrieval accuracy. The default `float32` provides higher precision but results in larger output files.
 
-### Top-K Mode
-When working with large datasets, consider using `--top-k` to save only the k nearest neighbors per image instead of the full distance matrix *if you want to minimize the size of the output*. This significantly reduces storage requirements when k << total number of images.
+`PAIRWISE_DTYPE=float16` halves the size of `pairwise_distances.npz` with negligible impact on retrieval accuracy. Use the default `float32` if you need higher precision.
 
-**Important:** If you plan to compute mAP later, ensure k is at least as large as the size of the largest series in your labels. Otherwise, some relevant images may be excluded from the evaluation.
+### Top-k mode
+
+For very large datasets, `TOP_K=K` saves only the `K` nearest neighbors per image instead of the full distance matrix, dramatically reducing storage when `K << N`. Trade-offs:
+
+* `metrics.precision_recall_plot` requires the full distance matrix and **cannot** consume top-k output.
+* `metrics.map` works with top-k, but `K` must be at least `largest_series_size - 1`.
+
+If unsure, leave `TOP_K` unset and use `PAIRWISE_DTYPE=float16` instead — that already produces a compact file while keeping every downstream tool usable.
 
 ## Benchmarks
 
-Performance benchmarks are available in [BENCHMARK.md](BENCHMARK.md), including detailed timing breakdowns, resource usage, and throughput metrics.
+See [BENCHMARK.md](BENCHMARK.md) for detailed timing breakdowns, resource usage, and throughput on the PIPA dataset.
