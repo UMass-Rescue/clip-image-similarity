@@ -32,18 +32,6 @@ def _flatten_upper_triangle_numpy(m: np.ndarray) -> np.ndarray:
     return np.asarray(out, dtype=np.float32)
 
 
-<<<<<<< HEAD
-def _write_image_paths_json(out_dir: Path, n: int) -> None:
-    image_paths = []
-    for idx in range(n):
-        image_path = out_dir / f"img_{idx}.png"
-        Image.new("RGB", (8, 8), color=(idx * 20, idx * 20, idx * 20)).save(image_path)
-        image_paths.append(image_path.as_posix())
-    (out_dir / "image_paths.json").write_text(json.dumps(image_paths), encoding="utf-8")
-
-
-=======
->>>>>>> histogram_and_precision_recall
 def test_series_distance_extractor_within_and_out_basic():
     m = _make_symmetric_distance_matrix(6)
     packed = PackedDistances(_flatten_upper_triangle_numpy(m))
