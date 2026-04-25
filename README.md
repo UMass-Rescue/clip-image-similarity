@@ -112,9 +112,9 @@ This reads `image_paths.json` from the output directory and generates `series_to
 After generating results, compute Mean Average Precision from the flattened distances and series indices:
 ```bash
 python -m metrics.map \
-  --distances ./results/evaluation_results/pairwise_distances.npz \
-  --series-indices ./results/series_to_indices.json \
-  --output_csv ./results/metrics/map.csv
+  --distances ./output2/evaluation_results/pairwise_distances.npz \
+  --series-indices ./output2/series_to_indices.json \
+  --output_csv ./output2/metrics/map.csv
 ```
 
 If you saved top-k neighbors instead of the full flattened distances:
@@ -132,6 +132,35 @@ python -m metrics.map \
   --labels ./resources/labels/images_series_labels.json \
   --image-paths ./results/image_paths.json \
   --output_csv ./results/metrics/map.csv
+```
+
+## Plot distance histograms (optional)
+
+To visualize the distribution of cosine distances **within series** vs **out of series**, run:
+
+```bash
+python -m metrics.distance_histogram \
+  --pairwise-output-dir ./output
+```
+
+This script expects the standard `clip_image_similarity.cli` outputs under the directory:
+- `evaluation_results/pairwise_distances.npz`
+- `series_to_indices.json`
+
+By default, out-of-series distances are computed against **all other images** in the pairwise matrix. To restrict out-of-series to labeled images only (union of `series_to_indices.json`), add:
+
+```bash
+python -m metrics.distance_histogram \
+  --pairwise-output-dir ./output \
+  --labeled-images-only
+```
+
+To also save the raw values used to plot each histogram:
+
+```bash
+python -m metrics.distance_histogram \
+  --pairwise-output-dir ./output \
+  --save-raw-values
 ```
 
 ## Performance Considerations
