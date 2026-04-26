@@ -13,6 +13,7 @@
 * **Retrieval metrics**: mean Average Precision (mAP@k), Precision@k, Recall@k — dataset-wide and per-series.
 * **Distance distribution analysis**: within-series vs out-of-series histograms, with optional rendered image-pair samples grouped by similarity percentile.
 * **Series cleanup tools**: filter out outlier images using mean within-series and out-of-series distance thresholds.
+* **Sub-series clustering**: split each existing series into thresholded clusters of similar images.
 
 ## Installation
 
@@ -22,7 +23,7 @@
 make install
 ```
 
-`make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–5 below) directly:
+`make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–6 below) directly:
 
 ```bash
 source .venv/bin/activate
@@ -49,7 +50,8 @@ labels.json + /path/to/images
                                             ├──▶ metrics.map                         (mAP@k CSV)
                                             ├──▶ metrics.precision_recall_plot       (P@k / R@k curves)
                                             ├──▶ metrics.distance_histogram          (histograms + sample renders)
-                                            └──▶ scripts.filter_series_by_avg_distance  (cleanup)
+                                            ├──▶ scripts.filter_series_by_avg_distance  (cleanup)
+                                            └──▶ scripts.cluster_series_by_distance     (sub-series)
 ```
 
 ## 1. Compute pairwise distances (`make run`)
@@ -226,6 +228,28 @@ The script writes a new sub-directory under `OUTPUT_DIR`, named after the thresh
 * `series_to_image_paths.json` — same data but as series → image paths.
 
 A summary of what was kept vs. removed is logged to stdout.
+
+## 6. Cluster series into sub-series
+
+`scripts.cluster_series_by_distance` splits each existing series into sub-series using agglomerative clustering over the saved cosine distances. Clustering is performed independently within each original series; images from different original series are never merged.
+
+```bash
+python -m scripts.cluster_series_by_distance \
+  --pairwise-output-dir ./out/run1 \
+  --distance-threshold 0.25 \
+  --min-samples 2
+```
+
+By default this uses average linkage and automatically cuts the hierarchy at `--distance-threshold`. You can pass `--linkage complete` for stricter clusters where the threshold acts on the maximum pairwise distance between clusters, or `--linkage single` for nearest-link behavior.
+
+The script requires the full `evaluation_results/pairwise_distances.npz`; top-k output is not enough for clustering because arbitrary within-series pair distances are needed.
+
+The script writes a new sub-directory under `OUTPUT_DIR`, named after the threshold, linkage, and minimum size (for example `clustered_series_by_distance_t0_25_average_min2/`), containing:
+
+* `series_to_indices.json` — the primary output. This is a flat mapping of output series labels to image indices, and can be passed to downstream tools that accept a series mapping. If an original series produces only one retained sub-series, its original series name is preserved. If it produces multiple retained sub-series, labels use suffixes such as `original_series_subseries_0`.
+* `series_to_image_paths.json` — the same flat sub-series mapping as image paths.
+* `series_to_subseries_indices.json` — nested mapping from original series to sub-series labels to indices.
+* `summary.json` — aggregate, per-series, and per-sub-series image counts, including how many small sub-series were dropped by `--min-samples`.
 
 ## Performance considerations
 
