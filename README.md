@@ -251,6 +251,15 @@ The script writes a new sub-directory under `OUTPUT_DIR`, named after the thresh
 * `series_to_subseries_indices.json` — nested mapping from original series to sub-series labels to indices.
 * `summary.json` — aggregate, per-series, and per-sub-series image counts, including how many small sub-series were dropped by `--min-samples`.
 
+If you later split or filter the flat sub-series labels and need to recover the original series labels, use `scripts.collapse_subseries_json` with the nested mapping:
+
+```bash
+python -m scripts.collapse_subseries_json \
+  --series-json ./out/run1/clustered_series_by_distance_t0_25_average_min2/train_series.json \
+  --series-to-subseries-json ./out/run1/clustered_series_by_distance_t0_25_average_min2/series_to_subseries_indices.json \
+  --output-json ./out/run1/clustered_series_by_distance_t0_25_average_min2/train_series_collapsed.json
+```
+
 ## Performance considerations
 
 ### Batch size
