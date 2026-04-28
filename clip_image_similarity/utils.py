@@ -81,7 +81,7 @@ def plural(value: int, word: str) -> str:
 
 
 # Common image handling utilities
-DEFAULT_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+DEFAULT_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".gif")
 
 
 def find_images(root: Path, valid_exts: Collection[str]) -> List[Path]:
