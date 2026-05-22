@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Optional random seed for reproducible splits.",
     )
+    parser.add_argument(
+        "--combine-train-val",
+        action="store_true",
+        default=False,
+        help="Also write a combined trainval_series.json merging train and val splits.",
+    )
     return parser.parse_args()
 
 
@@ -110,6 +116,7 @@ def write_series_splits(
     val_pct: int,
     test_pct: int | None = None,
     seed: int | None = None,
+    combine_train_val: bool = False,
 ) -> Path:
     """Load, split, and write train/val(/test) series JSON files."""
     series_mapping = load_series_json(series_json)
@@ -126,8 +133,10 @@ def write_series_splits(
     save_json(splits["val"], out_dir / "val_series.json")
     if "test" in splits:
         save_json(splits["test"], out_dir / "test_series.json")
+    if combine_train_val:
+        save_json({**splits["train"], **splits["val"]}, out_dir / "trainval_series.json")
 
-    _log_summary(splits=splits, out_dir=out_dir)
+    _log_summary(splits=splits, out_dir=out_dir, combine_train_val=combine_train_val)
     return out_dir
 
 
@@ -165,7 +174,9 @@ def _allocate_counts(total_count: int, percentages: Sequence[int]) -> List[int]:
     return counts
 
 
-def _log_summary(*, splits: Dict[str, SeriesMapping], out_dir: Path) -> None:
+def _log_summary(
+    *, splits: Dict[str, SeriesMapping], out_dir: Path, combine_train_val: bool = False
+) -> None:
     log("Series split summary:")
     for split_name, mapping in splits.items():
         image_count = sum(len(items) for items in mapping.values())
@@ -173,6 +184,10 @@ def _log_summary(*, splits: Dict[str, SeriesMapping], out_dir: Path) -> None:
             f"  {split_name}: "
             f"{len(mapping)} series, {plural(image_count, 'item')}"
         )
+    if combine_train_val:
+        trainval = {**splits["train"], **splits["val"]}
+        image_count = sum(len(items) for items in trainval.values())
+        log(f"  trainval: {len(trainval)} series, {plural(image_count, 'item')}")
     log(f"  output_dir: {out_dir}")
 
 
@@ -186,6 +201,7 @@ def main() -> None:
         val_pct=args.val_pct,
         test_pct=args.test_pct,
         seed=args.seed,
+        combine_train_val=args.combine_train_val,
     )
 
 
