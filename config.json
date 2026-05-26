@@ -1,0 +1,29 @@
+{
+  "min_samples": 5,
+  "output_base_dir": "/media/prasanna/4TB/work_data/step1_processed",
+  "models": [
+    {"name": "ViT-gopt-16-SigLIP2-384",   "id": "hf-hub:timm/ViT-gopt-16-SigLIP2-384"},
+    {"name": "ViT-SO400M-16-SigLIP2-384", "id": "hf-hub:timm/ViT-SO400M-16-SigLIP2-384"},
+    {"name": "DFN5B-CLIP-ViT-H-14-378",   "id": "hf-hub:apple/DFN5B-CLIP-ViT-H-14-378"}
+  ],
+  "datasets": [
+    {
+      "name": "image-series-dataset",
+      "series_image_path": "/media/prasanna/4TB/work_data/raw_data/image-series-dataset/series",
+      "series_labels_path": "/media/prasanna/4TB/work_data/raw_data/image-series-dataset/labels.json",
+      "distance_threshold": 0.3
+    },
+    {
+      "name": "pipa",
+      "series_image_path": "/media/prasanna/4TB/work_data/raw_data/PIPA/PIPA",
+      "series_labels_path": "/media/prasanna/4TB/work_data/raw_data/PIPA/PIPA/annotations/labels.json",
+      "distance_threshold": 0.3
+    },
+    {
+      "name": "cuhk",
+      "series_image_path": "/media/prasanna/4TB/work_data/raw_data/CUHK_03/cuhk_labeled/images",
+      "series_labels_path": "/media/prasanna/4TB/work_data/raw_data/CUHK_03/cuhk_labeled/labels.json",
+      "distance_threshold": 0.2
+    }
+  ]
+}
