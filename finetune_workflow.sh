@@ -1,14 +1,13 @@
-DATA_DIR=./out/cuhk_end_to_end
-MODEL="hf-hub:timm/ViT-SO400M-14-SigLIP2-378"
-PRETRAINED="dfn5b"
+DATA_DIR=/media/prasanna/4TB/work_data/step1_processed/DFN5B-CLIP-ViT-H-14-378/cuhk
+MODEL="hf-hub:apple/DFN5B-CLIP-ViT-H-14-378"
 BATCH_SIZE=8
 SERIES_EMBEDDING_BATCH_SIZE=128
 LR=1e-5
 WD=0.1
-EPOCHS=3
+EPOCHS=30
 WARMUP=100
 WORKERS=4
-LOGS_DIR=./logs
+LOGS_DIR=/media/prasanna/4TB/work_data/step2_finetune_logs/DFN5B-CLIP-ViT-H-14-378/cuhk
 DEVICE=cuda
 
 echo -e "\n=== Finetune on series ==="
@@ -29,7 +28,8 @@ python -m open_clip_train.main \
   --device $DEVICE \
   --logs "$LOGS_DIR" \
   --siglip \
-  --name cuhk-series
+  --name cuhk-series \
+  --report-to tensorboard
 
 echo -e "\n=== Finetune on subseries ==="
 python -m open_clip_train.main \
@@ -49,4 +49,5 @@ python -m open_clip_train.main \
   --device $DEVICE \
   --logs "$LOGS_DIR" \
   --siglip \
-  --name cuhk-subseries
+  --name cuhk-subseries \
+  --report-to tensorboard

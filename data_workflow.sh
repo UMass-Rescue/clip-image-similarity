@@ -5,6 +5,18 @@ MODEL=hf-hub:timm/ViT-SO400M-14-SigLIP2-378
 MIN_SAMPLES=5
 DISTANCE_THRESHOLD=0.3
 
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --series-image-path)    SERIES_IMAGE_PATH="$2";  shift 2 ;;
+    --series-labels-path)   SERIES_LABELS_PATH="$2"; shift 2 ;;
+    --output-base-dir)      OUTPUT_BASE_DIR="$2";    shift 2 ;;
+    --model)                MODEL="$2";              shift 2 ;;
+    --min-samples)          MIN_SAMPLES="$2";        shift 2 ;;
+    --distance-threshold)   DISTANCE_THRESHOLD="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1"; exit 1 ;;
+  esac
+done
+
 source .venv/bin/activate
 
 echo -e "\n=== Step 1: Split dataset into train/val/test ==="
@@ -35,8 +47,10 @@ python -m metrics.distance_histogram \
   --density \
   --labeled-images-only
 
-read -rp "Distance threshold [default: $DISTANCE_THRESHOLD]: " input
-DISTANCE_THRESHOLD="${input:-$DISTANCE_THRESHOLD}"
+if [ -t 0 ]; then
+  read -rp "Distance threshold [default: $DISTANCE_THRESHOLD]: " input
+  DISTANCE_THRESHOLD="${input:-$DISTANCE_THRESHOLD}"
+fi
 CLUSTER_DIR="$OUTPUT_BASE_DIR/distances/clustered_series_by_distance_t${DISTANCE_THRESHOLD//./_}_average_min$MIN_SAMPLES"
 
 echo -e "\n=== Step 4: Cluster trainval into subseries ==="
