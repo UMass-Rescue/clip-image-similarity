@@ -10,7 +10,7 @@
 * **GPU-accelerated** batch inference.
 * **Compact pairwise distance storage**: flattened upper-triangular matrix in `float32`/`float16`, or per-image top-k neighbors.
 * **Privacy-preserving** label anonymization (series → image-index mapping that hides filenames).
-* **Retrieval metrics**: mean Average Precision (mAP@k), Precision@k, Recall@k — dataset-wide and per-series.
+* **Retrieval metrics**: mean Average Precision (mAP@k), Precision@k, Recall@k, Accuracy@k (Hits@k) — dataset-wide and per-series.
 * **Distance distribution analysis**: within-series vs out-of-series histograms, with optional rendered image-pair samples grouped by similarity percentile.
 * **Series cleanup tools**: filter out outlier images using mean within-series and out-of-series distance thresholds.
 * **Sub-series clustering**: split each existing series into thresholded clusters of similar images.
@@ -23,7 +23,7 @@
 make install
 ```
 
-`make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–6 below) directly:
+`make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–7 below) directly:
 
 ```bash
 source .venv/bin/activate
@@ -49,6 +49,7 @@ labels.json + /path/to/images
                                             │
                                             ├──▶ metrics.map                         (mAP@k CSV)
                                             ├──▶ metrics.precision_recall_plot       (P@k / R@k curves)
+                                            ├──▶ metrics.accuracy_hits_k             (Accuracy@k / Hits@k CSV)
                                             ├──▶ metrics.distance_histogram          (histograms + sample renders)
                                             ├──▶ scripts.filter_series_by_avg_distance  (cleanup)
                                             └──▶ scripts.cluster_series_by_distance     (sub-series)
@@ -171,7 +172,28 @@ python -m metrics.precision_recall_plot \
 
 This script requires `evaluation_results/pairwise_distances.npz` and `series_to_indices.json`. Top-k input is **not** supported here.
 
-## 4. Plot distance histograms (and optional sample renderings)
+## 4. Compute Accuracy@k (Hits@k)
+
+`metrics.accuracy_hits_k` computes Accuracy@k (a.k.a. Hits@k): the fraction of labeled queries that have *at least one* same-series neighbor in their top-k retrieved results (self-matches excluded). Unlabeled neighbors are tolerated and treated as non-matches.
+
+```bash
+python -m metrics.accuracy_hits_k \
+  --pairwise-output-dir ./out/run1 \
+  --k 1 5 10 \
+  --output-csv ./out/run1/metrics/accuracy_hits_k.csv
+```
+
+### Options
+
+| Flag | Description |
+| --- | --- |
+| `--pairwise-output-dir` | Run output directory containing `evaluation_results/pairwise_distances.npz` and `series_to_indices.json`. Required. |
+| `--k` | One or more k values in ascending order, e.g. `--k 1 5 10`. Required. |
+| `--output-csv` | Optional CSV path. Columns: `k, hits, denom, hits_at_k, accuracy_at_k`. |
+
+Results are also printed to stdout. This script requires the full `pairwise_distances.npz` — top-k input is not supported.
+
+## 5. Plot distance histograms (and optional sample renderings)
 
 `metrics.distance_histogram` plots overlayed histograms of cosine distances **within series** vs **out-of-series**, and can optionally render representative image-pair samples grouped into similarity-percentile bins.
 
@@ -211,7 +233,7 @@ python -m metrics.distance_histogram \
 
 Histogram PNGs are written under `<OUTPUT_DIR>/graphs/distance_histogram_<timestamp>/`. Sample renderings (when enabled) are written under `<OUTPUT_DIR>/similarity_samples/<timestamp>/{within_series,out_of_series}/pct_<lo>_<hi>/`.
 
-## 5. Filter series by average distance
+## 6. Filter series by average distance
 
 `scripts.filter_series_by_avg_distance` cleans up noisy series labels: for each labeled image it computes the mean within-series and mean out-of-series distance, and drops images whose mean within-series distance is too high or whose mean out-of-series distance is too low. Series that end up with fewer than 2 retained images are dropped.
 
@@ -229,7 +251,7 @@ The script writes a new sub-directory under `OUTPUT_DIR`, named after the thresh
 
 A summary of what was kept vs. removed is logged to stdout.
 
-## 6. Cluster series into sub-series
+## 7. Cluster series into sub-series
 
 `scripts.cluster_series_by_distance` splits each existing series into sub-series using agglomerative clustering over the saved cosine distances. Clustering is performed independently within each original series; images from different original series are never merged.
 
