@@ -21,6 +21,39 @@ def make_images(tmp_path: Path, count: int = 3):
     return paths
 
 
+def assert_benchmark_common(
+    out_dir: Path,
+    *,
+    output_mode: str,
+    image_count: int,
+    model_id: str = "mock",
+    batch_size: int = 1,
+    device: str = "cpu",
+):
+    benchmark = json.loads((out_dir / "benchmark.json").read_text())
+    assert benchmark["model_id"] == model_id
+    assert benchmark["batch_size"] == batch_size
+    assert benchmark["device"] == device
+    assert benchmark["image_count"] == image_count
+    assert benchmark["embedding_dim"] == 2
+    assert benchmark["output_mode"] == output_mode
+    assert benchmark["pairwise_output_bytes"] > 0
+    assert benchmark["images_per_second_total"] > 0
+    assert benchmark["images_per_second_embedding"] > 0
+    assert benchmark["cuda_device_name"] is None
+    assert benchmark["cuda_peak_memory_allocated_bytes"] is None
+    assert benchmark["cuda_peak_memory_reserved_bytes"] is None
+    for key in (
+        "image_discovery_seconds",
+        "embedding_seconds",
+        "similarity_seconds",
+        "output_write_seconds",
+        "total_seconds",
+    ):
+        assert benchmark[key] >= 0
+    return benchmark
+
+
 def test_cli_run_pairwise(monkeypatch, tmp_path):
     """End-to-end pairwise run should save flattened distances and image paths.
 
@@ -57,6 +90,12 @@ def test_cli_run_pairwise(monkeypatch, tmp_path):
     assert "distances" in data and data["dtype"] == "float32"
     paths = json.loads((out_dir / "image_paths.json").read_text())
     assert paths == [p.as_posix() for p in images]
+    benchmark = assert_benchmark_common(
+        out_dir, output_mode="pairwise", image_count=len(images)
+    )
+    assert benchmark["pairwise_dtype"] == "float32"
+    assert benchmark["top_k"] is None
+    assert "label_mapping_seconds" not in benchmark
 
 
 def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
@@ -137,6 +176,11 @@ def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
     assert data["top_k"] == 1
     series_indices = json.loads((out_dir / "series_to_indices.json").read_text())
     assert series_indices == {"series": [0, 1]}
+    benchmark = assert_benchmark_common(
+        out_dir, output_mode="top_k", image_count=len(images)
+    )
+    assert benchmark["top_k"] == 1
+    assert benchmark["label_mapping_seconds"] >= 0
 
 
 def test_cli_main_entrypoint(monkeypatch, tmp_path):

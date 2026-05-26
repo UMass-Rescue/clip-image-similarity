@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from .benchmark import BenchmarkRecorder
 from .config import RunConfig
 from .embeddings import compute_image_embeddings
 from .serialization import save_config, save_json
@@ -155,6 +156,7 @@ def run(config: RunConfig) -> None:
         )
     config.ensure_output_dir()
     configure_logging(config.output_dir / "run.log")
+    benchmark = BenchmarkRecorder(config)
     log("Starting pairwise CLIP evaluation run...")
     log(f"Using model '{config.model_id}' on device '{config.device}'.")
     log(f"Writing outputs under {config.output_dir}.", allow_file=False)
@@ -163,7 +165,8 @@ def run(config: RunConfig) -> None:
         f"Searching for images under {config.input_dir} with extensions {config.image_exts}...",
         allow_file=False,
     )
-    image_paths = find_images(config.input_dir, config.image_exts)
+    with benchmark.stage("image_discovery"):
+        image_paths = find_images(config.input_dir, config.image_exts)
     if not image_paths:
         raise RuntimeError(
             f"No images found in {config.input_dir} with extensions {config.image_exts}"
@@ -185,71 +188,84 @@ def run(config: RunConfig) -> None:
     if config.checkpoint_path is not None:
         embedder_kwargs["checkpoint_path"] = config.checkpoint_path
 
-    embeddings = compute_image_embeddings(**embedder_kwargs)
+    with benchmark.stage("embedding"):
+        embeddings = compute_image_embeddings(**embedder_kwargs)
 
-    computer = SimilarityComputer(device=config.device)
-    sim = computer.cosine_similarity_matrix(embeddings, dtype=torch.float32)
-    dist = computer.similarity_to_distance(sim)
-    if config.pairwise_dtype == "float16":
-        dist = dist.to(torch.float16)
+    with benchmark.stage("similarity"):
+        computer = SimilarityComputer(device=config.device)
+        sim = computer.cosine_similarity_matrix(embeddings, dtype=torch.float32)
+        dist = computer.similarity_to_distance(sim)
+        if config.pairwise_dtype == "float16":
+            dist = dist.to(torch.float16)
 
-    eval_dir = config.output_dir / "evaluation_results"
-    eval_dir.mkdir(parents=True, exist_ok=True)
+    with benchmark.stage("output_write"):
+        eval_dir = config.output_dir / "evaluation_results"
+        eval_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.top_k:
-        pairwise_path = eval_dir / "pairwise_topk.npz"
-        if pairwise_path.exists() and not config.overwrite:
-            raise FileExistsError(
-                f"{pairwise_path} already exists. Use --overwrite to replace it."
+        if config.top_k:
+            output_mode = "top_k"
+            pairwise_path = eval_dir / "pairwise_topk.npz"
+            if pairwise_path.exists() and not config.overwrite:
+                raise FileExistsError(
+                    f"{pairwise_path} already exists. Use --overwrite to replace it."
+                )
+            log(
+                f"Extracting top-{config.top_k} neighbors per image and saving to {pairwise_path}."
             )
-        log(
-            f"Extracting top-{config.top_k} neighbors per image and saving to {pairwise_path}."
-        )
-        indices, distances = extract_topk_neighbors(
-            dist, top_k=config.top_k, dtype=config.pairwise_dtype
-        )
-        save_topk_neighbors(
-            pairwise_path,
-            indices=indices,
-            distances=distances,
-            dtype=config.pairwise_dtype,
-        )
-    else:
-        pairwise_path = eval_dir / "pairwise_distances.npz"
-        if pairwise_path.exists() and not config.overwrite:
-            raise FileExistsError(
-                f"{pairwise_path} already exists. Use --overwrite to replace it."
+            indices, distances = extract_topk_neighbors(
+                dist, top_k=config.top_k, dtype=config.pairwise_dtype
             )
-        log(
-            f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype})."
-        )
-        flat_np = flatten_upper_triangle(dist).cpu().numpy()
-        np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
-        flat_np = flat_np.astype(np_dtype, copy=False)
-        np.savez_compressed(
-            pairwise_path,
-            distances=flat_np,
-            dtype=config.pairwise_dtype,
-            allow_pickle=False,
-        )
+            save_topk_neighbors(
+                pairwise_path,
+                indices=indices,
+                distances=distances,
+                dtype=config.pairwise_dtype,
+            )
+        else:
+            output_mode = "pairwise"
+            pairwise_path = eval_dir / "pairwise_distances.npz"
+            if pairwise_path.exists() and not config.overwrite:
+                raise FileExistsError(
+                    f"{pairwise_path} already exists. Use --overwrite to replace it."
+                )
+            log(
+                f"Flattening and saving pairwise distances to {pairwise_path} (dtype={config.pairwise_dtype})."
+            )
+            flat_np = flatten_upper_triangle(dist).cpu().numpy()
+            np_dtype = np.float16 if config.pairwise_dtype == "float16" else np.float32
+            flat_np = flat_np.astype(np_dtype, copy=False)
+            np.savez_compressed(
+                pairwise_path,
+                distances=flat_np,
+                dtype=config.pairwise_dtype,
+                allow_pickle=False,
+            )
 
-    paths_json = config.output_dir / "image_paths.json"
-    save_json([p.as_posix() for p in image_paths], paths_json)
-    log(
-        f"Saved image path ordering to {paths_json} (do not share if paths are sensitive)."
-    )
+        paths_json = config.output_dir / "image_paths.json"
+        save_json([p.as_posix() for p in image_paths], paths_json)
+        log(
+            f"Saved image path ordering to {paths_json} (do not share if paths are sensitive)."
+        )
 
     if config.labels_path:
         log("Mapping provided labels to indices...")
-        series_indices = map_labels_to_indices(config.labels_path, image_paths)
-        series_out = config.output_dir / "series_to_indices.json"
-        save_json(series_indices, series_out)
+        with benchmark.stage("label_mapping"):
+            series_indices = map_labels_to_indices(config.labels_path, image_paths)
+            series_out = config.output_dir / "series_to_indices.json"
+            save_json(series_indices, series_out)
         log(f"Saved series->indices to {series_out} for downstream mAP.")
 
     save_config(config, config.output_dir)
+    benchmark_path = benchmark.save(
+        image_count=len(image_paths),
+        embedding_dim=embeddings.shape[1] if embeddings.ndim >= 2 else None,
+        output_mode=output_mode,
+        pairwise_output_path=pairwise_path,
+    )
 
     log("Run complete.")
     log(f"Saved pairwise distances to {pairwise_path}", allow_file=False)
+    log(f"Saved benchmark metadata to {benchmark_path}", allow_file=False)
     log(
         f"Processed {plural(len(image_paths), 'image')} using model {config.model_id} on {config.device}."
     )
