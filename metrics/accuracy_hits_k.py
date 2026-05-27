@@ -211,6 +211,12 @@ def _parse_args() -> argparse.Namespace:
         required=False,
         help="Optional CSV path to write k, hits, denom, hits_at_k, accuracy_at_k.",
     )
+    parser.add_argument(
+        "--labeled-images-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Restrict retrieval candidates to labeled images only (default: True). Use --no-labeled-images-only to consider all images in the matrix.",
+    )
     return parser.parse_args()
 
 
@@ -248,6 +254,14 @@ def main() -> None:
     series_map = _series_key_by_index(series_to_indices)
 
     preds_by_query = build_predictions_for_queries(dist, queries, show_progress=True)
+
+    if args.labeled_images_only:
+        labeled_set = set(queries)
+        preds_by_query = {
+            q: [p for p in preds if p in labeled_set]
+            for q, preds in preds_by_query.items()
+        }
+
     rows = hits_at_k(preds_by_query, series_map, ks=args.k)
 
     print("k,hits,denom,hits_at_k,accuracy_at_k")
