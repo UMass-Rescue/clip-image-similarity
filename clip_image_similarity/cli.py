@@ -13,7 +13,7 @@ from .serialization import save_config, save_json
 from .similarity import SimilarityComputer
 from .packed_distances import flatten_upper_triangle
 from .topk import extract_topk_neighbors, save_topk_neighbors
-from .labels import map_labels_to_indices
+from .labels import extract_labeled_paths, map_labels_to_indices
 from .utils import (
     DEFAULT_EXTS,
     configure_logging,
@@ -166,7 +166,10 @@ def run(config: RunConfig) -> None:
         allow_file=False,
     )
     with benchmark.stage("image_discovery"):
-        image_paths = find_images(config.input_dir, config.image_exts)
+        if config.labels_path:
+            image_paths = extract_labeled_paths(config.labels_path)
+        else:
+            image_paths = find_images(config.input_dir, config.image_exts)
     if not image_paths:
         raise RuntimeError(
             f"No images found in {config.input_dir} with extensions {config.image_exts}"

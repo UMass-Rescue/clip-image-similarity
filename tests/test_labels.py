@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from clip_image_similarity.labels import map_labels_to_indices
+from clip_image_similarity.labels import extract_labeled_paths, map_labels_to_indices
 
 
 def write_labels(tmp_path: Path, payload) -> Path:
@@ -50,6 +50,38 @@ def test_map_labels_rejects_non_string_paths(tmp_path):
     labels_path = write_labels(tmp_path, {"series": [123]})
     with pytest.raises(ValueError, match="must be strings"):
         map_labels_to_indices(labels_path, [])
+
+
+def test_extract_labeled_paths_happy_path(tmp_path):
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "sub" / "b.png"
+    for p in (a, b):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x", encoding="utf-8")
+    labels_path = write_labels(tmp_path, {"s1": [str(a), str(b)], "s2": [str(b)]})
+    result = extract_labeled_paths(labels_path)
+    assert result == sorted([a.resolve(), b.resolve()])
+
+
+def test_extract_labeled_paths_deduplicates(tmp_path):
+    a = tmp_path / "a.jpg"
+    a.write_text("x", encoding="utf-8")
+    labels_path = write_labels(tmp_path, {"s1": [str(a)], "s2": [str(a)]})
+    result = extract_labeled_paths(labels_path)
+    assert result == [a.resolve()]
+
+
+def test_extract_labeled_paths_missing_file_raises(tmp_path):
+    missing = tmp_path / "ghost.jpg"
+    labels_path = write_labels(tmp_path, {"s1": [str(missing)]})
+    with pytest.raises(FileNotFoundError, match="ghost.jpg"):
+        extract_labeled_paths(labels_path)
+
+
+def test_extract_labeled_paths_rejects_non_object(tmp_path):
+    labels_path = write_labels(tmp_path, ["not", "an", "object"])
+    with pytest.raises(ValueError, match="Labels file must be a JSON object"):
+        extract_labeled_paths(labels_path)
 
 
 def test_map_labels_errors_on_missing_paths(tmp_path):

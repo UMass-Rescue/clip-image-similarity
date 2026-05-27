@@ -2,7 +2,40 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set
+
+
+def extract_labeled_paths(labels_path: Path) -> List[Path]:
+    """Return sorted unique image paths referenced in a labels JSON file.
+
+    Args:
+        labels_path: Path to labels JSON (series -> list of image paths).
+    Returns:
+        Sorted list of resolved, deduplicated image Paths.
+    Raises:
+        FileNotFoundError: If any labeled image path does not exist on disk.
+        ValueError: If the labels file is malformed.
+    """
+    with labels_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("Labels file must be a JSON object of {series: [paths]}.")
+
+    seen: Set[str] = set()
+    paths: List[Path] = []
+    for series, series_paths in data.items():
+        if not isinstance(series_paths, list):
+            raise ValueError(f"Labels for series '{series}' must be a list.")
+        for p in series_paths:
+            resolved = Path(p).resolve()
+            key = resolved.as_posix()
+            if key in seen:
+                continue
+            seen.add(key)
+            if not resolved.is_file():
+                raise FileNotFoundError(f"Labeled image not found: {resolved}")
+            paths.append(resolved)
+    return sorted(paths)
 
 
 def map_labels_to_indices(

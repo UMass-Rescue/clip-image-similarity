@@ -145,12 +145,12 @@ def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
     labels_path.write_text(json.dumps(labels_payload), encoding="utf-8")
     out_dir = tmp_path / "out_topk"
 
-    monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
+    # find_images is no longer called when labels_path is set; labeled paths are used directly
     monkeypatch.setattr(
         cli,
         "compute_image_embeddings",
         lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+            [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -176,8 +176,9 @@ def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
     assert data["top_k"] == 1
     series_indices = json.loads((out_dir / "series_to_indices.json").read_text())
     assert series_indices == {"series": [0, 1]}
+    # Only the 2 labeled images are embedded — the 3rd image in input_topk is excluded
     benchmark = assert_benchmark_common(
-        out_dir, output_mode="top_k", image_count=len(images)
+        out_dir, output_mode="top_k", image_count=2
     )
     assert benchmark["top_k"] == 1
     assert benchmark["label_mapping_seconds"] >= 0
