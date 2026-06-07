@@ -210,3 +210,13 @@ __marimo__/
 results*
 .idea
 .vscode
+
+
+*_config.json
+PIPA_cluster_and_finetune.md
+out/*
+scripts/extract_cuhk03.py
+models_test*.sh
+scripts/compare_model_benchmarks.py
+scripts/extract_cuhk03.py
+recreate_results.md
