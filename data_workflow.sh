@@ -19,9 +19,19 @@ done
 
 source .venv/bin/activate
 
+LOADABLE_LABELS_PATH="$OUTPUT_BASE_DIR/data/loadable_series.json"
+SKIPPED_IMAGES_PATH="$OUTPUT_BASE_DIR/data/skipped_images.json"
+
+echo -e "\n=== Step 0: Filter labels to loadable images ==="
+python -m scripts.filter_loadable_labels \
+  --labels-json "$SERIES_LABELS_PATH" \
+  --output-json "$LOADABLE_LABELS_PATH" \
+  --skipped-json "$SKIPPED_IMAGES_PATH" \
+  --min-images-per-series 2
+
 echo -e "\n=== Step 1: Split dataset into train/val/test ==="
 python -m scripts.split_series_json \
-  --series-json "$SERIES_LABELS_PATH" \
+  --series-json "$LOADABLE_LABELS_PATH" \
   --out-dir "$OUTPUT_BASE_DIR/data" \
   --train-pct 70 \
   --val-pct 15 \
