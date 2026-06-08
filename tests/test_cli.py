@@ -9,6 +9,7 @@ from PIL import Image
 
 from clip_image_similarity import cli
 from clip_image_similarity.config import RunConfig
+from clip_image_similarity.embeddings import EmbeddingResult, SkippedImage
 
 
 def make_images(tmp_path: Path, count: int = 3):
@@ -19,6 +20,14 @@ def make_images(tmp_path: Path, count: int = 3):
         Image.new("RGB", (2, 2), color=(i, i, i)).save(p)
         paths.append(p.resolve())
     return paths
+
+
+def make_embedding_result(image_paths, rows, skipped=None):
+    return EmbeddingResult(
+        embeddings=torch.tensor(rows, dtype=torch.float32),
+        image_paths=list(image_paths),
+        skipped_images=skipped or [],
+    )
 
 
 def assert_benchmark_common(
@@ -66,9 +75,9 @@ def test_cli_run_pairwise(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -98,6 +107,149 @@ def test_cli_run_pairwise(monkeypatch, tmp_path):
     assert "label_mapping_seconds" not in benchmark
 
 
+def test_cli_skips_failed_images_from_outputs(monkeypatch, tmp_path):
+    images = make_images(tmp_path / "input_skip")
+    out_dir = tmp_path / "out_skip"
+    skipped = [
+        SkippedImage(
+            path=images[1],
+            index=1,
+            error_type="UnidentifiedImageError",
+            error_message="cannot identify image file",
+        )
+    ]
+
+    monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            [images[0], images[2]],
+            [[1.0, 0.0], [0.0, 1.0]],
+            skipped=skipped,
+        ),
+    )
+    monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
+
+    cfg = RunConfig(
+        input_dir=tmp_path / "input_skip",
+        output_dir=out_dir,
+        model_id="mock",
+        batch_size=1,
+        device="cpu",
+        image_exts=(".png",),
+    )
+
+    cli.run(cfg)
+
+    paths = json.loads((out_dir / "image_paths.json").read_text())
+    assert paths == [images[0].as_posix(), images[2].as_posix()]
+    data = np.load(
+        out_dir / "evaluation_results" / "pairwise_distances.npz",
+        allow_pickle=False,
+    )
+    assert data["distances"].shape == (1,)
+    skipped_manifest = json.loads((out_dir / "skipped_images.json").read_text())
+    assert skipped_manifest["skipped_image_count"] == 1
+    assert skipped_manifest["skipped_images"][0]["path"] == images[1].as_posix()
+    benchmark = assert_benchmark_common(
+        out_dir, output_mode="pairwise", image_count=2
+    )
+    assert benchmark["discovered_image_count"] == 3
+    assert benchmark["skipped_image_count"] == 1
+
+
+def test_cli_filters_labels_in_memory_after_skips(monkeypatch, tmp_path):
+    images = make_images(tmp_path / "input_label_skip")
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(
+        json.dumps(
+            {
+                "keep": [images[0].as_posix(), images[1].as_posix()],
+                "drop": [images[2].as_posix()],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out_label_skip"
+    skipped = [
+        SkippedImage(
+            path=images[2],
+            index=2,
+            error_type="OSError",
+            error_message="truncated",
+        )
+    ]
+
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            [images[0], images[1]],
+            [[1.0, 0.0], [0.0, 1.0]],
+            skipped=skipped,
+        ),
+    )
+    monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
+
+    cfg = RunConfig(
+        input_dir=tmp_path / "input_label_skip",
+        output_dir=out_dir,
+        model_id="mock",
+        batch_size=1,
+        device="cpu",
+        image_exts=(".png",),
+        labels_path=labels_path,
+    )
+
+    cli.run(cfg)
+
+    assert json.loads((out_dir / "series_to_indices.json").read_text()) == {
+        "keep": [0, 1]
+    }
+    assert not (out_dir / "loadable_series.json").exists()
+
+
+def test_cli_all_skipped_images_writes_manifest_and_fails(monkeypatch, tmp_path):
+    images = make_images(tmp_path / "input_all_skip", count=1)
+    out_dir = tmp_path / "out_all_skip"
+    skipped = [
+        SkippedImage(
+            path=images[0],
+            index=0,
+            error_type="OSError",
+            error_message="cannot load",
+        )
+    ]
+
+    monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            [],
+            [],
+            skipped=skipped,
+        ),
+    )
+    monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
+
+    cfg = RunConfig(
+        input_dir=tmp_path / "input_all_skip",
+        output_dir=out_dir,
+        model_id="mock",
+        batch_size=1,
+        device="cpu",
+        image_exts=(".png",),
+    )
+
+    with pytest.raises(RuntimeError, match="No images could be loaded"):
+        cli.run(cfg)
+
+    assert (out_dir / "skipped_images.json").exists()
+    assert not (out_dir / "image_paths.json").exists()
+
+
 def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
     """Pairwise run with float16 storage should downcast distances on disk.
 
@@ -109,9 +261,9 @@ def test_cli_run_pairwise_float16(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -148,9 +300,9 @@ def test_cli_run_topk_with_labels(monkeypatch, tmp_path):
     # find_images is no longer called when labels_path is set; labeled paths are used directly
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -193,9 +345,9 @@ def test_cli_main_entrypoint(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -228,9 +380,9 @@ def test_cli_existing_topk_and_pairwise_files(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
@@ -345,6 +497,13 @@ def test_cli_errors(monkeypatch, tmp_path):
         cli.run(cfg_no_images)
 
     monkeypatch.setattr(cli, "find_images", lambda root, exts: [input_dir / "a.png"])
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0]]
+        ),
+    )
     cfg_topk_large = RunConfig(
         input_dir=input_dir,
         output_dir=tmp_path / "out_err3",
@@ -360,9 +519,9 @@ def test_cli_errors(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_images", lambda root, exts: [input_dir / "a.png"])
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0]]
         ),
     )
     # Create existing pairwise file to trigger overwrite protection
@@ -435,7 +594,7 @@ def test_cli_run_forwards_loader_options(monkeypatch, tmp_path):
     checkpoint_path.touch()
     captured = {}
 
-    def fake_compute_image_embeddings(
+    def fake_compute_image_embeddings_with_metadata(
         image_paths,
         model_id,
         device,
@@ -451,10 +610,14 @@ def test_cli_run_forwards_loader_options(monkeypatch, tmp_path):
             pretrained=pretrained,
             checkpoint_path=checkpoint_path,
         )
-        return torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+        return make_embedding_result(image_paths[:2], [[1.0, 0.0], [0.0, 1.0]])
 
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)
-    monkeypatch.setattr(cli, "compute_image_embeddings", fake_compute_image_embeddings)
+    monkeypatch.setattr(
+        cli,
+        "compute_image_embeddings_with_metadata",
+        fake_compute_image_embeddings_with_metadata,
+    )
     monkeypatch.setattr(cli, "configure_logging", lambda log_file: None)
 
     cfg = RunConfig(
@@ -483,18 +646,18 @@ def test_cli_main_module_guard(monkeypatch, tmp_path):
     """Executing clip_image_similarity.cli via runpy should still complete a run."""
     images = make_images(tmp_path / "input_guard")
     out_dir = tmp_path / "out_guard"
-    # Pre-patch embeddings.compute_image_embeddings so the re-executed module uses the stub.
+    # Pre-patch embeddings.compute_image_embeddings_with_metadata so the re-executed module uses the stub.
     monkeypatch.setattr(
-        "clip_image_similarity.embeddings.compute_image_embeddings",
-        lambda image_paths, model_id, device, batch_size: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+        "clip_image_similarity.embeddings.compute_image_embeddings_with_metadata",
+        lambda image_paths, model_id, device, batch_size: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(
         cli,
-        "compute_image_embeddings",
-        lambda *a, **k: torch.tensor(
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float32
+        "compute_image_embeddings_with_metadata",
+        lambda image_paths, *a, **k: make_embedding_result(
+            image_paths, [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
         ),
     )
     monkeypatch.setattr(cli, "find_images", lambda root, exts: images)

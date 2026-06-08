@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from clip_image_similarity.labels import extract_labeled_paths, map_labels_to_indices
+from clip_image_similarity.labels import (
+    extract_labeled_paths,
+    filter_label_mapping_to_available_paths,
+    map_labels_to_indices,
+)
 
 
 def write_labels(tmp_path: Path, payload) -> Path:
@@ -92,3 +96,17 @@ def test_map_labels_errors_on_missing_paths(tmp_path):
     with pytest.raises(ValueError) as exc:
         map_labels_to_indices(labels_path, [present])
     assert "missing.jpg" in str(exc.value)
+
+
+def test_filter_label_mapping_to_available_paths_drops_small_series(tmp_path):
+    images = [tmp_path / "a.jpg", tmp_path / "b.jpg", tmp_path / "c.jpg"]
+    labels = {
+        "keep": [str(images[0]), str(images[1])],
+        "drop_missing": [str(images[2])],
+    }
+
+    result = filter_label_mapping_to_available_paths(labels, images[:2])
+
+    assert result == {
+        "keep": [images[0].resolve().as_posix(), images[1].resolve().as_posix()]
+    }

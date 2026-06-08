@@ -4,7 +4,11 @@ import numpy as np
 import torch
 from PIL import Image
 
-from clip_image_similarity.embeddings import ClipEmbedder, compute_image_embeddings
+from clip_image_similarity.embeddings import (
+    ClipEmbedder,
+    compute_image_embeddings,
+    compute_image_embeddings_with_metadata,
+)
 
 
 class DummyModel:
@@ -54,6 +58,50 @@ def test_compute_image_embeddings_uses_mocked_model(monkeypatch, tmp_path):
     assert embs.shape == (2, 1)
     # preprocess returns 1.0, model multiplies by 2
     assert torch.allclose(embs, torch.tensor([[2.0], [2.0]], dtype=torch.float32))
+
+
+def test_compute_image_embeddings_with_metadata_skips_bad_images(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "clip_image_similarity.embeddings.open_clip.create_model_from_pretrained",
+        lambda model_id: (DummyModel(), dummy_preprocess),
+    )
+    image_paths = create_images(tmp_path, 2)
+    bad = tmp_path / "bad.png"
+    bad.write_text("not an image", encoding="utf-8")
+    paths = [image_paths[0], bad, image_paths[1]]
+
+    result = compute_image_embeddings_with_metadata(
+        image_paths=paths,
+        model_id="mock",
+        device="cpu",
+        batch_size=2,
+    )
+
+    assert result.image_paths == [image_paths[0], image_paths[1]]
+    assert result.embeddings.shape == (2, 1)
+    assert len(result.skipped_images) == 1
+    assert result.skipped_images[0].path == bad
+    assert result.skipped_images[0].index == 1
+
+
+def test_compute_image_embeddings_with_metadata_all_bad_images(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "clip_image_similarity.embeddings.open_clip.create_model_from_pretrained",
+        lambda model_id: (DummyModel(), dummy_preprocess),
+    )
+    bad = tmp_path / "bad.png"
+    bad.write_text("not an image", encoding="utf-8")
+
+    result = compute_image_embeddings_with_metadata(
+        image_paths=[bad],
+        model_id="mock",
+        device="cpu",
+        batch_size=1,
+    )
+
+    assert result.image_paths == []
+    assert result.embeddings.shape == (0, 0)
+    assert len(result.skipped_images) == 1
 
 
 def test_clip_embedder_cleanup_calls_cuda_empty_cache(monkeypatch):
