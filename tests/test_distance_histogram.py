@@ -32,6 +32,15 @@ def _flatten_upper_triangle_numpy(m: np.ndarray) -> np.ndarray:
     return np.asarray(out, dtype=np.float32)
 
 
+def _write_image_paths_json(out_dir: Path, count: int) -> None:
+    image_paths = []
+    for idx in range(count):
+        image_path = out_dir / f"sample_{idx}.png"
+        Image.new("RGB", (16, 12), color=(idx * 30, idx * 20, idx * 10)).save(image_path)
+        image_paths.append(image_path.as_posix())
+    (out_dir / "image_paths.json").write_text(json.dumps(image_paths), encoding="utf-8")
+
+
 def test_series_distance_extractor_within_and_out_basic():
     m = _make_symmetric_distance_matrix(6)
     packed = PackedDistances(_flatten_upper_triangle_numpy(m))
@@ -97,5 +106,4 @@ def test_runner_creates_expected_outputs(tmp_path: Path):
     for bin_info in within_manifest["bins"] + out_manifest["bins"]:
         for sample in bin_info["samples"]:
             assert (sample_roots[0] / sample["file"]).is_file()
-
 
