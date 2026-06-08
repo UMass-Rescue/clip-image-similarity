@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Dict, List
 
 import numpy as np
 import torch
 
 from .benchmark import BenchmarkRecorder
 from .config import RunConfig
-from .embeddings import compute_image_embeddings
+from .embeddings import SkippedImage, compute_image_embeddings_with_metadata
 from .serialization import save_config, save_json
 from .similarity import SimilarityComputer
 from .packed_distances import flatten_upper_triangle
 from .topk import extract_topk_neighbors, save_topk_neighbors
-from .labels import extract_labeled_paths, map_labels_to_indices
+from .labels import (
+    extract_labeled_paths,
+    filter_label_mapping_to_available_paths,
+    load_label_mapping,
+    map_label_mapping_to_indices,
+)
 from .utils import (
     DEFAULT_EXTS,
     configure_logging,
@@ -22,6 +28,82 @@ from .utils import (
     log,
     plural,
 )
+
+
+MIN_LABEL_IMAGES_PER_SERIES = 2
+
+
+def _skipped_image_dict(skipped: SkippedImage) -> Dict[str, object]:
+    return {
+        "path": skipped.path.resolve().as_posix(),
+        "original_index": skipped.index,
+        "error_type": skipped.error_type,
+        "error_message": skipped.error_message,
+    }
+
+
+def _write_skipped_images_manifest(
+    output_dir: Path, skipped_images: List[SkippedImage]
+) -> Path | None:
+    if not skipped_images:
+        return None
+    skipped_path = output_dir / "skipped_images.json"
+    save_json(
+        {
+            "skipped_image_count": len(skipped_images),
+            "skipped_images": [
+                _skipped_image_dict(skipped) for skipped in skipped_images
+            ],
+        },
+        skipped_path,
+    )
+    return skipped_path
+
+
+def _log_skipped_images_summary(
+    skipped_images: List[SkippedImage], skipped_path: Path | None
+) -> None:
+    if not skipped_images:
+        return
+    location = f" See {skipped_path}." if skipped_path is not None else ""
+    log(
+        f"WARNING: Skipped {plural(len(skipped_images), 'image')} that could not be loaded."
+        f"{location}",
+    )
+    preview_count = min(20, len(skipped_images))
+    for skipped in skipped_images[:preview_count]:
+        log(
+            "  skipped "
+            f"{skipped.path}: {skipped.error_type}: {skipped.error_message}",
+        )
+    if len(skipped_images) > preview_count:
+        log(
+            f"  ... and {len(skipped_images) - preview_count} more skipped images",
+        )
+
+
+def _clean_labels_for_embedded_paths(
+    labels_path: Path, image_paths: List[Path]
+) -> Dict[str, List[str]]:
+    labels = load_label_mapping(labels_path)
+    cleaned = filter_label_mapping_to_available_paths(
+        labels,
+        image_paths,
+        min_images_per_series=MIN_LABEL_IMAGES_PER_SERIES,
+    )
+    dropped_count = len(labels) - len(cleaned)
+    if dropped_count:
+        log(
+            "Dropped "
+            f"{plural(dropped_count, 'series')} with fewer than "
+            f"{MIN_LABEL_IMAGES_PER_SERIES} successfully embedded images."
+        )
+    if not cleaned:
+        raise RuntimeError(
+            "No labeled series contain at least "
+            f"{MIN_LABEL_IMAGES_PER_SERIES} successfully embedded images."
+        )
+    return cleaned
 
 
 def parse_args_to_config() -> RunConfig:
@@ -174,11 +256,8 @@ def run(config: RunConfig) -> None:
         raise RuntimeError(
             f"No images found in {config.input_dir} with extensions {config.image_exts}"
         )
+    discovered_image_count = len(image_paths)
     log(f"Found {plural(len(image_paths), 'image')} to process.")
-    if config.top_k is not None and config.top_k >= len(image_paths):
-        raise ValueError(
-            f"--top-k must be less than the number of images ({len(image_paths)}); got {config.top_k}."
-        )
 
     embedder_kwargs = {
         "image_paths": image_paths,
@@ -192,7 +271,21 @@ def run(config: RunConfig) -> None:
         embedder_kwargs["checkpoint_path"] = config.checkpoint_path
 
     with benchmark.stage("embedding"):
-        embeddings = compute_image_embeddings(**embedder_kwargs)
+        embedding_result = compute_image_embeddings_with_metadata(**embedder_kwargs)
+    skipped_manifest_path = _write_skipped_images_manifest(
+        config.output_dir, embedding_result.skipped_images
+    )
+    image_paths = embedding_result.image_paths
+    embeddings = embedding_result.embeddings
+    if not image_paths:
+        _log_skipped_images_summary(
+            embedding_result.skipped_images, skipped_manifest_path
+        )
+        raise RuntimeError("No images could be loaded for embedding.")
+    if config.top_k is not None and config.top_k >= len(image_paths):
+        raise ValueError(
+            f"--top-k must be less than the number of embedded images ({len(image_paths)}); got {config.top_k}."
+        )
 
     with benchmark.stage("similarity"):
         computer = SimilarityComputer(device=config.device)
@@ -253,7 +346,10 @@ def run(config: RunConfig) -> None:
     if config.labels_path:
         log("Mapping provided labels to indices...")
         with benchmark.stage("label_mapping"):
-            series_indices = map_labels_to_indices(config.labels_path, image_paths)
+            cleaned_labels = _clean_labels_for_embedded_paths(
+                config.labels_path, image_paths
+            )
+            series_indices = map_label_mapping_to_indices(cleaned_labels, image_paths)
             series_out = config.output_dir / "series_to_indices.json"
             save_json(series_indices, series_out)
         log(f"Saved series->indices to {series_out} for downstream mAP.")
@@ -264,6 +360,8 @@ def run(config: RunConfig) -> None:
         embedding_dim=embeddings.shape[1] if embeddings.ndim >= 2 else None,
         output_mode=output_mode,
         pairwise_output_path=pairwise_path,
+        discovered_image_count=discovered_image_count,
+        skipped_image_count=len(embedding_result.skipped_images),
     )
 
     log("Run complete.")
@@ -272,6 +370,7 @@ def run(config: RunConfig) -> None:
     log(
         f"Processed {plural(len(image_paths), 'image')} using model {config.model_id} on {config.device}."
     )
+    _log_skipped_images_summary(embedding_result.skipped_images, skipped_manifest_path)
 
 
 def main() -> None:
