@@ -174,7 +174,9 @@ The final outputs are:
 <output_dir>/step3_eval/plots/<dataset_name>/
 ```
 
-The summary CSV contains Accuracy@k for the pretrained model, the series-finetuned checkpoints, and the subseries-finetuned checkpoints. All are evaluated against the same original series-level test split.
+The summary CSV contains Accuracy@k for the pretrained model, the series-finetuned checkpoints, and the subseries-finetuned checkpoints. The plots folder contains a plot of the learning curves (Accuracy@k vs epochs). All are evaluated against the same original series-level test split.
+
+Please send us the `<output_dir>/step3_eval/summary_<dataset_name>.csv` and the plot in `<output_dir>/step3_eval/plots/<dataset_name>/`.
 
 ## Troubleshooting
 
