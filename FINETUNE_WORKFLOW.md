@@ -115,6 +115,15 @@ This writes processed data under:
 <output_dir>/step1_processed/
 ```
 
+During data preparation, the workflow first writes a loadable copy of the label mapping and a skipped-image manifest:
+
+```text
+<output_dir>/step1_processed/<model_name>/<dataset_name>/data/loadable_series.json
+<output_dir>/step1_processed/<model_name>/<dataset_name>/data/skipped_images.json
+```
+
+The train/val/test splits are created from `loadable_series.json`, so later workflow stages only see images that Pillow can decode.
+
 ## 2. Fine-Tune
 
 Clone and set up the fine-tuning repository:
@@ -165,11 +174,13 @@ The final outputs are:
 <output_dir>/step3_eval/plots/<dataset_name>/
 ```
 
-The summary CSV contains Accuracy@k for the pretrained model, the series-finetuned checkpoints, and the subseries-finetuned checkpoints. All are evaluated against the same original series-level test split.
+The summary CSV contains Accuracy@k for the pretrained model, the series-finetuned checkpoints, and the subseries-finetuned checkpoints. The plots folder contains a plot of the learning curves (Accuracy@k vs epochs). All are evaluated against the same original series-level test split.
+
+Please send us the `<output_dir>/step3_eval/summary_<dataset_name>.csv` and the plot in `<output_dir>/step3_eval/plots/<dataset_name>/`.
 
 ## Troubleshooting
 
 - If data preparation fails because an output directory already exists, use a fresh `output_dir`.
-- If label mapping fails, check that every image path in `labels_json` exists and is under `image_dir`.
+- If label filtering drops more images than expected, inspect `data/skipped_images.json` under the generated step1 dataset directory.
 - If evaluation reports missing checkpoints, confirm that fine-tuning completed and that checkpoints exist under `<output_dir>/step2_finetune_logs/`.
 - If a command contains `<output_dir>`, replace it with the actual `output_dir` value from `finetune_config.json`, or copy the concrete command from `<output_dir>/configs/commands.txt`.

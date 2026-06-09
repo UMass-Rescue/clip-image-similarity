@@ -57,7 +57,7 @@ labels.json + /path/to/images
 
 ## 1. Compute pairwise distances (`make run`)
 
-`make run` embeds every image under `INPUT_DIR`, writes pairwise distances under `OUTPUT_DIR`, and — when `ANONYMIZE_LABELS` is set — also writes the index-mapped `series_to_indices.json` required by every downstream metric.
+`make run` embeds every loadable image under `INPUT_DIR`, writes pairwise distances under `OUTPUT_DIR`, and — when `ANONYMIZE_LABELS` is set — also writes the index-mapped `series_to_indices.json` required by every downstream metric. Truncated images are loaded with Pillow's tolerant decoding; images that still fail to load are skipped and excluded from every downstream artifact.
 
 **Default path (recommended):**
 
@@ -112,8 +112,9 @@ make run \
 | --- | --- |
 | `evaluation_results/pairwise_distances.npz` | Flattened upper-triangular distances `(1 - cosine_similarity)`. dtype controlled by `PAIRWISE_DTYPE`. Written when `TOP_K` is *not* set. |
 | `evaluation_results/pairwise_topk.npz` | Per-image top-k neighbor indices/distances. Written when `TOP_K` is set, in place of `pairwise_distances.npz`. |
-| `image_paths.json` | Ordered list of image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
+| `image_paths.json` | Ordered list of successfully embedded image paths corresponding to indices in the flattened array. **Do not share if filenames are sensitive.** |
 | `series_to_indices.json` | Written when `ANONYMIZE_LABELS` is set. Maps series → indices for downstream evaluation while keeping paths private. |
+| `skipped_images.json` | Written only when one or more discovered images could not be loaded. Lists skipped paths and load errors. |
 | `config.json` | Snapshot of the run configuration. |
 | `run.log` | Log of the run. |
 

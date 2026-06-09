@@ -57,8 +57,8 @@ def test_dataset_precision_recall_at_k_micro_aggregation():
     preds_by_query = {
         0: [0, 1, 2, 3],
         1: [1, 0, 2, 3],
-        2: [2, 0, 1, 3],
-        3: [3, 0, 1, 2],
+        2: [2, 3, 0, 1],
+        3: [3, 2, 0, 1],
     }
     series_to_indices = {"A": [0, 1], "B": [2, 3]}
     result = dataset_precision_recall_at_k(preds_by_query, series_to_indices, max_predictions=1)
@@ -86,5 +86,4 @@ def test_select_k_values_log_includes_endpoints_and_is_sorted_unique():
     assert ks[-1] == 100
     assert ks == sorted(ks)
     assert len(ks) == len(set(ks))
-
 

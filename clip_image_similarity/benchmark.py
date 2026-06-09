@@ -43,6 +43,8 @@ class BenchmarkRecorder:
         embedding_dim: Optional[int],
         output_mode: str,
         pairwise_output_path: Path,
+        discovered_image_count: Optional[int] = None,
+        skipped_image_count: int = 0,
     ) -> Path:
         """Write benchmark.json and return its path."""
         self._sync_cuda()
@@ -71,6 +73,8 @@ class BenchmarkRecorder:
                 "pairwise_dtype": self.config.pairwise_dtype,
                 "top_k": self.config.top_k,
                 "image_count": image_count,
+                "discovered_image_count": discovered_image_count,
+                "skipped_image_count": skipped_image_count,
                 "embedding_dim": embedding_dim,
                 "output_mode": output_mode,
                 "pairwise_output_path": str(pairwise_output_path),

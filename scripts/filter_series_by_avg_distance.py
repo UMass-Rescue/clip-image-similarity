@@ -12,6 +12,9 @@ from clip_image_similarity.utils import log, plural
 from metrics.series_indices import load_series_indices, validate_series_indices
 
 
+THRESHOLD_EPSILON = 1e-6
+
+
 @dataclass(frozen=True)
 class FilterStats:
     """Summary statistics for a filtering run."""
@@ -210,8 +213,8 @@ def filter_series_to_indices(
 
         kept: List[int] = []
         for idx in idxs:
-            fails_in = mean_within[idx] > in_series_threshold
-            fails_out = mean_out[idx] < out_of_series_threshold
+            fails_in = mean_within[idx] - in_series_threshold > THRESHOLD_EPSILON
+            fails_out = out_of_series_threshold - mean_out[idx] > THRESHOLD_EPSILON
             if fails_in:
                 removed_by_in_series_threshold_count += 1
             if fails_out:

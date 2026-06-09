@@ -76,7 +76,7 @@ def plural(value: int, word: str) -> str:
     Returns:
         A user-friendly phrase such as '3 images'.
     """
-    suffix = "" if value == 1 else "s"
+    suffix = "" if value == 1 or word.endswith("series") else "s"
     return f"{value} {word}{suffix}"
 
 

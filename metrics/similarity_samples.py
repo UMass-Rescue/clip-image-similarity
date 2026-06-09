@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from tqdm import tqdm
 
+from clip_image_similarity.image_loader import load_rgb_image
 from clip_image_similarity.packed_distances import PackedDistances
 from clip_image_similarity.serialization import save_json
 from clip_image_similarity.utils import log, plural
@@ -504,8 +505,7 @@ def _render_pair_sample(
 
 
 def _prepare_panel_image(path: Path, panel_size_px: int) -> Image.Image:
-    with Image.open(path) as img:
-        rgb = img.convert("RGB")
+    rgb = load_rgb_image(path)
     return ImageOps.contain(
         rgb,
         (panel_size_px - 8, panel_size_px - 8),
