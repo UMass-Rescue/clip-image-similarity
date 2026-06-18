@@ -23,16 +23,32 @@
 make install
 ```
 
+If you prefer an existing environment (for example, Anaconda/conda), create and activate it first, then use the `*-current-env` targets:
+
+```bash
+conda create -n clip-sim python=3.12 -y
+conda activate clip-sim
+make install-current-env
+```
+
 `make run`, `make anonymize-labels`, and `make test` reuse this environment automatically. You only need to activate the venv when running the downstream metric scripts (sections 2–7 below) directly:
 
 ```bash
 source .venv/bin/activate
 ```
 
+With conda, keep the conda environment activated instead of `.venv`.
+
 ## Tests
 
 ```bash
 make test
+```
+
+For a pre-activated conda environment:
+
+```bash
+make test-current-env
 ```
 
 Runs the `pytest` suite with coverage over `clip_image_similarity` and `metrics`.
@@ -63,6 +79,20 @@ labels.json + /path/to/images
 
 ```bash
 make run \
+  INPUT_DIR=/path/to/images \
+  OUTPUT_DIR=./out/run1 \
+  MODEL="ViT-H-14-378-quickgelu" \
+  PRETRAINED=dfn5b \
+  ANONYMIZE_LABELS=/path/to/labels.json \
+  BATCH_SIZE=64 \
+  DEVICE=cuda \
+  PAIRWISE_DTYPE=float16
+```
+
+If using a pre-activated conda environment, use:
+
+```bash
+make run-current-env \
   INPUT_DIR=/path/to/images \
   OUTPUT_DIR=./out/run1 \
   MODEL="ViT-H-14-378-quickgelu" \
@@ -118,7 +148,7 @@ make run \
 | `config.json` | Snapshot of the run configuration. |
 | `run.log` | Log of the run. |
 
-> If you forgot to pass `ANONYMIZE_LABELS` to `make run`, you can generate `series_to_indices.json` after the fact with `make anonymize-labels OUTPUT_DIR=./out/run1 LABELS=/path/to/labels.json` (add `OVERWRITE=1` to replace an existing file).
+> If you forgot to pass `ANONYMIZE_LABELS` to `make run`, you can generate `series_to_indices.json` after the fact with `make anonymize-labels OUTPUT_DIR=./out/run1 LABELS=/path/to/labels.json` (add `OVERWRITE=1` to replace an existing file). For a pre-activated conda environment, use `make anonymize-labels-current-env OUTPUT_DIR=./out/run1 LABELS=/path/to/labels.json`.
 
 ## 2. Compute mAP
 
