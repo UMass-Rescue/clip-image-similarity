@@ -8,8 +8,12 @@ import json
 import re
 import shlex
 import sys
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, NamedTuple
+
+import numpy as np
+from PIL import Image
 
 
 MODEL_NAME = "ViT-SO400M-16-SigLIP2-384"
@@ -23,7 +27,24 @@ DATA_CONFIG_NAME = "data_config.json"
 TEST_EVAL_CONFIG_NAME = "test_eval_config.json"
 RUN_FINETUNE_NAME = "run_finetune.sh"
 COMMANDS_NAME = "commands.txt"
+DEDUPED_LABELS_NAME = "deduplicated_series_labels.json"
+DEDUP_MANIFEST_NAME = "deduplicated_images.json"
+PHASH_SIZE = 8
+PHASH_HIGHFREQ_FACTOR = 4
+PHASH_IMAGE_SIZE = PHASH_SIZE * PHASH_HIGHFREQ_FACTOR
+DEFAULT_PHASH_THRESHOLD = 4
 DATASET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+class ImageReference(NamedTuple):
+    series: str
+    path: str
+
+
+class ImageHashRecord(NamedTuple):
+    path: str
+    hash_value: int
+    hash_hex: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +59,23 @@ def parse_args() -> argparse.Namespace:
         help="Path to finetune_config.json.",
     )
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--deduplicate-images",
+        action="store_true",
+        help=(
+            "Write a de-duplicated labels JSON using 64-bit pHash and point the "
+            "generated workflow configs at it."
+        ),
+    )
+    parser.add_argument(
+        "--phash-threshold",
+        type=int,
+        default=DEFAULT_PHASH_THRESHOLD,
+        help=(
+            "Maximum pHash Hamming distance to treat two images as duplicates "
+            f"(default: {DEFAULT_PHASH_THRESHOLD})."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -45,9 +83,15 @@ def main() -> int:
     args = parse_args()
     try:
         epochs = validate_epochs(args.epochs)
+        phash_threshold = validate_phash_threshold(args.phash_threshold)
         config_path = Path(args.config).resolve()
         cfg = load_workflow_config(config_path)
-        generated = generate_workflow_files(cfg, epochs=epochs)
+        generated = generate_workflow_files(
+            cfg,
+            epochs=epochs,
+            deduplicate_images=args.deduplicate_images,
+            phash_threshold=phash_threshold,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -118,7 +162,22 @@ def validate_epochs(epochs: int) -> int:
     return epochs
 
 
-def generate_workflow_files(cfg: Dict[str, Any], *, epochs: int) -> Dict[str, Path]:
+def validate_phash_threshold(threshold: int) -> int:
+    if not 0 <= threshold <= PHASH_SIZE * PHASH_SIZE:
+        raise ValueError(
+            f"--phash-threshold must be between 0 and {PHASH_SIZE * PHASH_SIZE}; "
+            f"got {threshold}."
+        )
+    return threshold
+
+
+def generate_workflow_files(
+    cfg: Dict[str, Any],
+    *,
+    epochs: int,
+    deduplicate_images: bool = False,
+    phash_threshold: int = DEFAULT_PHASH_THRESHOLD,
+) -> Dict[str, Path]:
     dataset_name = cfg["dataset_name"]
     image_dir = cfg["image_dir"]
     labels_json = cfg["labels_json"]
@@ -133,6 +192,16 @@ def generate_workflow_files(cfg: Dict[str, Any], *, epochs: int) -> Dict[str, Pa
     eval_epochs = list(range(SAVE_FREQUENCY, epochs + 1, SAVE_FREQUENCY))
 
     configs_dir.mkdir(parents=True, exist_ok=True)
+
+    dedupe_manifest_path = configs_dir / DEDUP_MANIFEST_NAME
+    if deduplicate_images:
+        labels_json = configs_dir / DEDUPED_LABELS_NAME
+        deduplicate_label_mapping(
+            input_json=cfg["labels_json"],
+            output_json=labels_json,
+            manifest_json=dedupe_manifest_path,
+            phash_threshold=phash_threshold,
+        )
 
     data_config_path = configs_dir / DATA_CONFIG_NAME
     test_eval_config_path = configs_dir / TEST_EVAL_CONFIG_NAME
@@ -198,10 +267,208 @@ def generate_workflow_files(cfg: Dict[str, Any], *, epochs: int) -> Dict[str, Pa
         "test_eval_config": test_eval_config_path,
         "run_finetune": run_finetune_path,
         "commands": commands_path,
+        **(
+            {
+                "deduplicated_labels": labels_json,
+                "dedupe_manifest": dedupe_manifest_path,
+            }
+            if deduplicate_images
+            else {}
+        ),
     }
 
 
+def deduplicate_label_mapping(
+    *,
+    input_json: Path,
+    output_json: Path,
+    manifest_json: Path,
+    phash_threshold: int = DEFAULT_PHASH_THRESHOLD,
+) -> Dict[str, List[str]]:
+    labels = load_label_mapping(input_json)
+    image_records = hash_unique_images(iter_image_references(labels))
+
+    kept_by_path: Dict[str, ImageHashRecord] = {}
+    duplicates_by_path: Dict[str, Dict[str, Any]] = {}
+    hash_errors = []
+    for path, result in image_records.items():
+        if isinstance(result, Exception):
+            hash_errors.append(
+                {
+                    "path": path,
+                    "error_type": type(result).__name__,
+                    "error_message": str(result),
+                }
+            )
+            kept_by_path[path] = ImageHashRecord(path=path, hash_value=-1, hash_hex="")
+            continue
+
+        duplicate_of = find_duplicate(result, kept_by_path.values(), phash_threshold)
+        if duplicate_of is None:
+            kept_by_path[path] = result
+        else:
+            duplicates_by_path[path] = {
+                "path": path,
+                "hash": result.hash_hex,
+                "duplicate_of": duplicate_of.path,
+                "duplicate_of_hash": duplicate_of.hash_hex,
+                "hamming_distance": hamming_distance(
+                    result.hash_value, duplicate_of.hash_value
+                ),
+            }
+
+    cleaned: Dict[str, List[str]] = {}
+    removed_references = []
+    globally_seen_paths: set[str] = set()
+    for series, paths in labels.items():
+        retained: List[str] = []
+        seen: set[str] = set()
+        for raw_path in paths:
+            path = Path(raw_path).resolve().as_posix()
+            if path in duplicates_by_path:
+                removed_references.append({"series": series, **duplicates_by_path[path]})
+                continue
+            if path in seen or path in globally_seen_paths:
+                removed_references.append(
+                    {
+                        "series": series,
+                        "path": path,
+                        "duplicate_of": path,
+                        "hamming_distance": 0,
+                        "reason": (
+                            "repeated within series"
+                            if path in seen
+                            else "repeated across series"
+                        ),
+                    }
+                )
+                continue
+            retained.append(path)
+            seen.add(path)
+            globally_seen_paths.add(path)
+        cleaned[series] = retained
+
+    manifest = {
+        "hash_algorithm": "phash",
+        "hash_bits": PHASH_SIZE * PHASH_SIZE,
+        "phash_threshold": phash_threshold,
+        "input_series_count": len(labels),
+        "input_image_reference_count": sum(len(paths) for paths in labels.values()),
+        "input_unique_image_count": len(image_records),
+        "output_series_count": len(cleaned),
+        "output_image_reference_count": sum(len(paths) for paths in cleaned.values()),
+        "removed_unique_image_count": len(duplicates_by_path),
+        "removed_image_reference_count": len(removed_references),
+        "hash_error_count": len(hash_errors),
+        "removed_image_references": removed_references,
+        "hash_errors": hash_errors,
+    }
+
+    write_json(output_json, cleaned)
+    write_json(manifest_json, manifest)
+    return cleaned
+
+
+def load_label_mapping(labels_path: Path) -> Dict[str, List[str]]:
+    with labels_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("labels_json must be a JSON object mapping series to paths.")
+
+    labels: Dict[str, List[str]] = {}
+    for series, paths in data.items():
+        if not isinstance(series, str):
+            raise ValueError("All series names in labels_json must be strings.")
+        if not isinstance(paths, list):
+            raise ValueError(f"Series '{series}' must map to a list of image paths.")
+        labels[series] = []
+        for idx, path in enumerate(paths):
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError(
+                    f"Series '{series}' has a non-string image path at index {idx}."
+                )
+            labels[series].append(path)
+    return labels
+
+
+def iter_image_references(labels: Dict[str, List[str]]) -> Iterable[ImageReference]:
+    for series, paths in labels.items():
+        for path in paths:
+            yield ImageReference(series=series, path=Path(path).resolve().as_posix())
+
+
+def hash_unique_images(
+    references: Iterable[ImageReference],
+) -> Dict[str, ImageHashRecord | Exception]:
+    records: Dict[str, ImageHashRecord | Exception] = {}
+    for reference in references:
+        if reference.path in records:
+            continue
+        try:
+            hash_value = phash_image(Path(reference.path))
+        except Exception as exc:
+            records[reference.path] = exc
+        else:
+            records[reference.path] = ImageHashRecord(
+                path=reference.path,
+                hash_value=hash_value,
+                hash_hex=f"{hash_value:016x}",
+            )
+    return records
+
+
+def find_duplicate(
+    candidate: ImageHashRecord,
+    retained: Iterable[ImageHashRecord],
+    threshold: int,
+) -> ImageHashRecord | None:
+    best: tuple[int, ImageHashRecord] | None = None
+    for record in retained:
+        if record.hash_value < 0:
+            continue
+        distance = hamming_distance(candidate.hash_value, record.hash_value)
+        if distance <= threshold and (best is None or distance < best[0]):
+            best = (distance, record)
+    return None if best is None else best[1]
+
+
+def phash_image(path: Path) -> int:
+    with Image.open(path) as image:
+        pixels = (
+            image.convert("L")
+            .resize((PHASH_IMAGE_SIZE, PHASH_IMAGE_SIZE), Image.Resampling.LANCZOS)
+        )
+        matrix = np.asarray(pixels, dtype=np.float32)
+
+    dct = dct_matrix(PHASH_IMAGE_SIZE) @ matrix @ dct_matrix(PHASH_IMAGE_SIZE).T
+    low_freq = dct[:PHASH_SIZE, :PHASH_SIZE]
+    median = float(np.median(low_freq.reshape(-1)[1:]))
+    bits = low_freq > median
+
+    hash_value = 0
+    for bit in bits.reshape(-1):
+        hash_value = (hash_value << 1) | int(bit)
+    return hash_value
+
+
+@lru_cache(maxsize=None)
+def dct_matrix(size: int) -> np.ndarray:
+    matrix = np.empty((size, size), dtype=np.float32)
+    scale0 = np.sqrt(1.0 / size)
+    scale = np.sqrt(2.0 / size)
+    for k in range(size):
+        alpha = scale0 if k == 0 else scale
+        for n in range(size):
+            matrix[k, n] = alpha * np.cos(np.pi * (2 * n + 1) * k / (2 * size))
+    return matrix
+
+
+def hamming_distance(left: int, right: int) -> int:
+    return (left ^ right).bit_count()
+
+
 def write_json(path: Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")

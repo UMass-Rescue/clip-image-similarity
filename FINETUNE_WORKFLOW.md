@@ -78,6 +78,17 @@ Edit the four fields:
 
 The image paths in `labels_json` must point to images under `image_dir`.
 
+If your dataset is organized as one folder per series, generate `labels_json` with:
+
+```bash
+python scripts/generate_labels_json.py \
+  --series-dir <image_dir> \
+  --output-json <labels_json>
+```
+
+For example, if `image_dir` is `/home/gbiss/Documents/image-series-dataset/series`,
+each immediate child directory becomes one series in the generated JSON.
+
 ## 1. Prepare Data
 
 Clone and set up the evaluation repository:
@@ -101,6 +112,33 @@ Generate the internal workflow configs:
 
 ```bash
 python scripts/prepare_finetune_workflow.py --config finetune_config.json
+```
+
+Optionally, have the preparation script create a de-duplicated label mapping before
+the workflow configs are written:
+
+```bash
+python scripts/prepare_finetune_workflow.py --config finetune_config.json --deduplicate-images
+```
+
+This uses a 64-bit perceptual hash (`pHash`) and treats images whose hashes are
+within a Hamming distance of 4 as duplicates by default. To tune that threshold:
+
+```bash
+python scripts/prepare_finetune_workflow.py --config finetune_config.json --deduplicate-images --phash-threshold 2
+```
+
+When de-duplication is enabled, the generated data and evaluation configs point
+at:
+
+```text
+<output_dir>/configs/deduplicated_series_labels.json
+```
+
+The removed-image audit manifest is written to:
+
+```text
+<output_dir>/configs/deduplicated_images.json
 ```
 
 Run data preparation:
