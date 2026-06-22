@@ -8,6 +8,7 @@ import json
 import re
 import shlex
 import sys
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple
@@ -27,6 +28,8 @@ DATA_CONFIG_NAME = "data_config.json"
 TEST_EVAL_CONFIG_NAME = "test_eval_config.json"
 RUN_FINETUNE_NAME = "run_finetune.sh"
 COMMANDS_NAME = "commands.txt"
+PRECHECKED_LABELS_NAME = "decode_checked_series_labels.json"
+DECODE_MANIFEST_NAME = "image_decode_failures.json"
 DEDUPED_LABELS_NAME = "deduplicated_series_labels.json"
 DEDUP_MANIFEST_NAME = "deduplicated_images.json"
 PHASH_SIZE = 8
@@ -193,11 +196,20 @@ def generate_workflow_files(
 
     configs_dir.mkdir(parents=True, exist_ok=True)
 
+    prechecked_labels_path = configs_dir / PRECHECKED_LABELS_NAME
+    decode_manifest_path = configs_dir / DECODE_MANIFEST_NAME
+    filter_decodable_label_mapping(
+        input_json=labels_json,
+        output_json=prechecked_labels_path,
+        manifest_json=decode_manifest_path,
+    )
+    labels_json = prechecked_labels_path
+
     dedupe_manifest_path = configs_dir / DEDUP_MANIFEST_NAME
     if deduplicate_images:
         labels_json = configs_dir / DEDUPED_LABELS_NAME
         deduplicate_label_mapping(
-            input_json=cfg["labels_json"],
+            input_json=prechecked_labels_path,
             output_json=labels_json,
             manifest_json=dedupe_manifest_path,
             phash_threshold=phash_threshold,
@@ -267,6 +279,8 @@ def generate_workflow_files(
         "test_eval_config": test_eval_config_path,
         "run_finetune": run_finetune_path,
         "commands": commands_path,
+        "decode_checked_labels": prechecked_labels_path,
+        "decode_manifest": decode_manifest_path,
         **(
             {
                 "deduplicated_labels": labels_json,
@@ -276,6 +290,97 @@ def generate_workflow_files(
             else {}
         ),
     }
+
+
+def filter_decodable_label_mapping(
+    *,
+    input_json: Path,
+    output_json: Path,
+    manifest_json: Path,
+) -> Dict[str, List[str]]:
+    labels = load_label_mapping(input_json)
+    ordered_paths: List[str] = []
+    affected_series: Dict[str, List[str]] = {}
+    for series, paths in labels.items():
+        for raw_path in paths:
+            path = Path(raw_path).resolve().as_posix()
+            if path not in affected_series:
+                ordered_paths.append(path)
+                affected_series[path] = []
+            if series not in affected_series[path]:
+                affected_series[path].append(series)
+
+    decodable_paths: set[str] = set()
+    failures = []
+    warning_records = []
+    for path in ordered_paths:
+        try:
+            image_warnings = decode_image(Path(path))
+        except Exception as exc:
+            failures.append(
+                {
+                    "path": path,
+                    "affected_series": affected_series[path],
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+            )
+            continue
+
+        decodable_paths.add(path)
+        if image_warnings:
+            warning_records.append(
+                {
+                    "path": path,
+                    "affected_series": affected_series[path],
+                    "warnings": image_warnings,
+                }
+            )
+
+    cleaned: Dict[str, List[str]] = {}
+    removed_references = []
+    for series, paths in labels.items():
+        retained: List[str] = []
+        for raw_path in paths:
+            path = Path(raw_path).resolve().as_posix()
+            if path in decodable_paths:
+                retained.append(path)
+            else:
+                removed_references.append({"series": series, "path": path})
+        cleaned[series] = retained
+
+    manifest = {
+        "input_series_count": len(labels),
+        "input_image_reference_count": sum(len(paths) for paths in labels.values()),
+        "input_unique_image_count": len(ordered_paths),
+        "output_series_count": len(cleaned),
+        "output_image_reference_count": sum(len(paths) for paths in cleaned.values()),
+        "failed_unique_image_count": len(failures),
+        "removed_image_reference_count": len(removed_references),
+        "warning_unique_image_count": len(warning_records),
+        "decode_failures": failures,
+        "removed_image_references": removed_references,
+        "decode_warnings": warning_records,
+    }
+
+    write_json(output_json, cleaned)
+    write_json(manifest_json, manifest)
+    return cleaned
+
+
+def decode_image(path: Path) -> List[Dict[str, str]]:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with Image.open(path) as image:
+            image.load()
+            image.convert("RGB").close()
+    return [
+        {
+            "warning_type": warning.category.__name__,
+            "warning_message": str(warning.message),
+        }
+        for warning in caught
+    ]
 
 
 def deduplicate_label_mapping(
@@ -433,12 +538,14 @@ def find_duplicate(
 
 
 def phash_image(path: Path) -> int:
-    with Image.open(path) as image:
-        pixels = (
-            image.convert("L")
-            .resize((PHASH_IMAGE_SIZE, PHASH_IMAGE_SIZE), Image.Resampling.LANCZOS)
-        )
-        matrix = np.asarray(pixels, dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with Image.open(path) as image:
+            pixels = (
+                image.convert("L")
+                .resize((PHASH_IMAGE_SIZE, PHASH_IMAGE_SIZE), Image.Resampling.LANCZOS)
+            )
+            matrix = np.asarray(pixels, dtype=np.float32)
 
     dct = dct_matrix(PHASH_IMAGE_SIZE) @ matrix @ dct_matrix(PHASH_IMAGE_SIZE).T
     low_freq = dct[:PHASH_SIZE, :PHASH_SIZE]

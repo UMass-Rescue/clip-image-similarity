@@ -114,8 +114,24 @@ Generate the internal workflow configs:
 python scripts/prepare_finetune_workflow.py --config finetune_config.json
 ```
 
-Optionally, have the preparation script create a de-duplicated label mapping before
-the workflow configs are written:
+The preparation script first checks that every labeled image can be decoded by
+Pillow. The generated data config points at:
+
+```text
+<output_dir>/configs/decode_checked_series_labels.json
+```
+
+Any images that fail decoding are omitted from that file and recorded in:
+
+```text
+<output_dir>/configs/image_decode_failures.json
+```
+
+Images that decode successfully but trigger Pillow warnings are retained and
+listed in the same manifest under `decode_warnings`.
+
+Optionally, have the preparation script create a de-duplicated label mapping
+after the decode precheck:
 
 ```bash
 python scripts/prepare_finetune_workflow.py --config finetune_config.json --deduplicate-images
@@ -128,14 +144,13 @@ within a Hamming distance of 4 as duplicates by default. To tune that threshold:
 python scripts/prepare_finetune_workflow.py --config finetune_config.json --deduplicate-images --phash-threshold 2
 ```
 
-When de-duplication is enabled, the generated data and evaluation configs point
-at:
+When de-duplication is enabled, the generated data config points at:
 
 ```text
 <output_dir>/configs/deduplicated_series_labels.json
 ```
 
-The removed-image audit manifest is written to:
+The removed-duplicate audit manifest is written to:
 
 ```text
 <output_dir>/configs/deduplicated_images.json
@@ -153,7 +168,7 @@ This writes processed data under:
 <output_dir>/step1_processed/
 ```
 
-During data preparation, the workflow first writes a loadable copy of the label mapping and a skipped-image manifest:
+During data preparation, the workflow still writes a loadable copy of the label mapping and a skipped-image manifest:
 
 ```text
 <output_dir>/step1_processed/<model_name>/<dataset_name>/data/loadable_series.json

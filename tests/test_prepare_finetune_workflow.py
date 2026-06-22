@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 
 from scripts.prepare_finetune_workflow import (
     deduplicate_label_mapping,
+    filter_decodable_label_mapping,
     generate_workflow_files,
     hamming_distance,
     phash_image,
@@ -71,6 +72,57 @@ def test_deduplicate_label_mapping_removes_near_duplicate_files_and_repeated_pat
         duplicate.as_posix(),
         original.as_posix(),
     }
+
+
+def test_filter_decodable_label_mapping_omits_decode_failures(tmp_path):
+    good = _write_image(tmp_path / "images" / "good.png")
+    bad = tmp_path / "images" / "bad.png"
+    bad.write_text("not an image", encoding="utf-8")
+    labels_path = _write_labels(
+        tmp_path / "labels.json",
+        {"series_a": [good.as_posix(), bad.resolve().as_posix()]},
+    )
+    output_path = tmp_path / "out" / "labels.json"
+    manifest_path = tmp_path / "out" / "decode_failures.json"
+
+    result = filter_decodable_label_mapping(
+        input_json=labels_path,
+        output_json=output_path,
+        manifest_json=manifest_path,
+    )
+
+    assert result == {"series_a": [good.as_posix()]}
+    assert json.loads(output_path.read_text()) == result
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["failed_unique_image_count"] == 1
+    assert manifest["removed_image_reference_count"] == 1
+    assert manifest["decode_failures"][0]["path"] == bad.resolve().as_posix()
+
+
+def test_generate_workflow_files_points_configs_at_decode_checked_labels(tmp_path):
+    image = _write_image(tmp_path / "images" / "image.png")
+    labels_path = _write_labels(
+        tmp_path / "labels.json",
+        {"series_a": [image.as_posix()]},
+    )
+
+    generated = generate_workflow_files(
+        {
+            "dataset_name": "dataset",
+            "image_dir": tmp_path / "images",
+            "labels_json": labels_path,
+            "output_dir": tmp_path / "workflow",
+        },
+        epochs=9,
+    )
+
+    assert generated["decode_checked_labels"].is_file()
+    assert generated["decode_manifest"].is_file()
+    data_config = json.loads(generated["data_config"].read_text())
+    assert (
+        data_config["datasets"][0]["series_labels_path"]
+        == generated["decode_checked_labels"].as_posix()
+    )
 
 
 def test_generate_workflow_files_points_configs_at_deduplicated_labels(tmp_path):
