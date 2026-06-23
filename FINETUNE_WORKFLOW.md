@@ -220,16 +220,26 @@ Run test-set evaluation:
 python run_eval.py --config <output_dir>/configs/test_eval_config.json
 ```
 
+If `<output_dir>/step3_eval/` already contains pairwise distance outputs, rerunning the same command reuses those distances and regenerates the metrics CSVs and plots. Use `--overwrite` only when you want to recompute the embeddings and pairwise distances themselves. Use `--skip-existing` to leave runs alone when both metrics CSVs already exist.
+
 The final outputs are:
 
 ```text
 <output_dir>/step3_eval/summary_<dataset_name>.csv
+<output_dir>/step3_eval/summary_precision_recall_<dataset_name>.csv
+<output_dir>/step3_eval/summary_precision_at_k_<dataset_name>.csv
 <output_dir>/step3_eval/plots/<dataset_name>/
 ```
 
-The summary CSV contains Accuracy@k for the pretrained model, the series-finetuned checkpoints, and the subseries-finetuned checkpoints. The plots folder contains a plot of the learning curves (Accuracy@k vs epochs). All are evaluated against the same original series-level test split.
+The summary CSVs contain:
 
-Please send us the `<output_dir>/step3_eval/summary_<dataset_name>.csv` and the plot in `<output_dir>/step3_eval/plots/<dataset_name>/`.
+- `summary_<dataset_name>.csv`: Accuracy@k / Hits@k.
+- `summary_precision_recall_<dataset_name>.csv`: Precision@k and Recall@k, including hit and denominator counts.
+- `summary_precision_at_k_<dataset_name>.csv`: Precision@k only, as a compact CSV for precision-at-k analysis.
+
+The plots folder contains learning-curve plots for Accuracy@k and Precision@k at the configured `eval_k` values, plus a Precision-vs-Recall plot with one curve per fine-tuning epoch. Each point on those curves is a k value, and duplicate rows for the same model/checkpoint/epoch/k are averaged. All are evaluated against the same held-out test split.
+
+Please send us the CSVs under `<output_dir>/step3_eval/` and the plots in `<output_dir>/step3_eval/plots/<dataset_name>/`.
 
 ## Troubleshooting
 

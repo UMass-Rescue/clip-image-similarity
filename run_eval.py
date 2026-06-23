@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Evaluate pretrained and finetuned checkpoints for one dataset.
 
-Runs clip_image_similarity.cli + metrics.accuracy_hits_k for every
-(model, checkpoint_type, epoch) combination, then writes a summary CSV
-and learning-curve / final-epoch comparison plots.
+Runs clip_image_similarity.cli plus retrieval metrics for every
+(model, checkpoint_type, epoch) combination, then writes summary CSVs
+and learning-curve plots.
 
 Usage:
-    python run_eval.py --config eval_config_cuhk.json [--overwrite]
+    python run_eval.py --config eval_config_cuhk.json [--overwrite] [--skip-existing]
 """
 
 import argparse
@@ -38,15 +38,21 @@ def _run_one(
     skip_existing: bool,
 ) -> None:
     out = Path(output_dir)
-    metrics_csv = str(out / "metrics" / "accuracy_hits_k.csv")
+    metrics_dir = out / "metrics"
+    pairwise_path = out / "evaluation_results" / "pairwise_distances.npz"
+    accuracy_csv = str(metrics_dir / "accuracy_hits_k.csv")
+    precision_recall_csv = str(metrics_dir / "precision_recall_at_k.csv")
 
     if skip_existing:
-        if (out / "metrics" / "accuracy_hits_k.csv").is_file():
-            tqdm.write(f"    skip (metrics csv exists)")
+        metrics_done = (
+            (metrics_dir / "accuracy_hits_k.csv").is_file()
+            and (metrics_dir / "precision_recall_at_k.csv").is_file()
+        )
+        if metrics_done:
+            tqdm.write(f"    skip (metrics csvs exist)")
             return
-        pairwise_done = (out / "evaluation_results" / "pairwise_distances.npz").is_file()
-    else:
-        pairwise_done = False
+
+    pairwise_done = pairwise_path.is_file() and not overwrite
 
     if not pairwise_done:
         cli_cmd = [
@@ -69,9 +75,17 @@ def _run_one(
         "python", "-m", "metrics.accuracy_hits_k",
         "--pairwise-output-dir", output_dir,
         "--k", *[str(k) for k in eval_k],
-        "--output-csv", metrics_csv,
+        "--output-csv", accuracy_csv,
     ]
     subprocess.run(acc_cmd, check=True, stdin=subprocess.DEVNULL)
+
+    pr_cmd = [
+        "python", "-m", "metrics.precision_recall_at_k",
+        "--pairwise-output-dir", output_dir,
+        "--all-k",
+        "--output-csv", precision_recall_csv,
+    ]
+    subprocess.run(pr_cmd, check=True, stdin=subprocess.DEVNULL)
 
 
 def _build_run_list(cfg: Dict[str, Any]) -> List[Dict]:
@@ -149,7 +163,21 @@ def _read_accuracy_csv(path: Path) -> Dict[int, float]:
     return out
 
 
-def _collect_results(runs: List[Dict], step3_base: str) -> List[Dict]:
+def _read_precision_recall_csv(path: Path) -> Dict[int, Dict[str, float]]:
+    out: Dict[int, Dict[str, float]] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            out[int(row["k"])] = {
+                "hits": int(row["hits"]),
+                "precision_denom": int(row["precision_denom"]),
+                "recall_denom": int(row["recall_denom"]),
+                "precision_at_k": float(row["precision_at_k"]),
+                "recall_at_k": float(row["recall_at_k"]),
+            }
+    return out
+
+
+def _collect_accuracy_results(runs: List[Dict]) -> List[Dict]:
     """Read accuracy CSVs from completed runs and return rows for the summary CSV."""
     rows = []
     for run in runs:
@@ -169,12 +197,30 @@ def _collect_results(runs: List[Dict], step3_base: str) -> List[Dict]:
     return rows
 
 
-def _write_summary_csv(rows: List[Dict], out_path: Path) -> None:
+def _collect_precision_recall_results(runs: List[Dict]) -> List[Dict]:
+    """Read precision/recall CSVs from completed runs and return summary rows."""
+    rows = []
+    for run in runs:
+        csv_path = Path(run["output_dir"]) / "metrics" / "precision_recall_at_k.csv"
+        if not csv_path.is_file():
+            tqdm.write(f"  WARNING: missing {csv_path} — skipping.")
+            continue
+        pr_by_k = _read_precision_recall_csv(csv_path)
+        for k, values in pr_by_k.items():
+            rows.append({
+                "model": run["model_name"],
+                "checkpoint_type": run["checkpoint_type"],
+                "epoch": run["epoch"] if run["epoch"] is not None else "pretrained",
+                "k": k,
+                **values,
+            })
+    return rows
+
+
+def _write_summary_csv(rows: List[Dict], out_path: Path, fieldnames: List[str]) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=["model", "checkpoint_type", "epoch", "k", "accuracy_at_k"]
-        )
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
     print(f"Wrote summary CSV: {out_path}")
@@ -184,21 +230,66 @@ def _write_summary_csv(rows: List[Dict], out_path: Path) -> None:
 # Plotting
 # ---------------------------------------------------------------------------
 
-def _make_plots(rows: List[Dict], plots_dir: Path) -> None:
+def _make_plots(
+    accuracy_rows: List[Dict],
+    pr_rows: List[Dict],
+    plots_dir: Path,
+    eval_k: List[int],
+) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
 
+    if accuracy_rows:
+        _make_metric_learning_plot(
+            rows=accuracy_rows,
+            plots_dir=plots_dir,
+            value_key="accuracy_at_k",
+            ylabel="Accuracy@k",
+            title="Accuracy@k learning curves",
+            filename_prefix="learning_curves",
+        )
+
+    if pr_rows:
+        precision_plot_rows = [r for r in pr_rows if r["k"] in set(eval_k)]
+        if precision_plot_rows:
+            _make_metric_learning_plot(
+                rows=precision_plot_rows,
+                plots_dir=plots_dir,
+                value_key="precision_at_k",
+                ylabel="Precision@k",
+                title="Precision@k learning curves",
+                filename_prefix="precision_at_k_learning_curves",
+            )
+        _plot_precision_vs_recall_curves(pr_rows, plots_dir)
+
+
+def _make_metric_learning_plot(
+    *,
+    rows: List[Dict],
+    plots_dir: Path,
+    value_key: str,
+    ylabel: str,
+    title: str,
+    filename_prefix: str,
+) -> None:
     models = sorted({r["model"] for r in rows})
     ks = sorted({r["k"] for r in rows})
 
-    # Index rows for quick lookup: (model, checkpoint_type, epoch, k) -> accuracy
     idx: Dict = {}
     for r in rows:
-        idx[(r["model"], r["checkpoint_type"], r["epoch"], r["k"])] = r["accuracy_at_k"]
+        idx[(r["model"], r["checkpoint_type"], r["epoch"], r["k"])] = r[value_key]
 
-    _plot_learning_curves(idx, models, ks, plots_dir)
+    _plot_learning_curves(idx, models, ks, plots_dir, ylabel, title, filename_prefix)
 
 
-def _plot_learning_curves(idx, models, ks, plots_dir: Path) -> None:
+def _plot_learning_curves(
+    idx,
+    models,
+    ks,
+    plots_dir: Path,
+    ylabel: str,
+    title: str,
+    filename_prefix: str,
+) -> None:
     """Single stacked figure: rows=models, cols=k values, tight per-subplot y-axis."""
     epochs_int = sorted({ep for (_, _, ep, _) in idx if isinstance(ep, int)})
     n_rows, n_cols = len(models), len(ks)
@@ -242,19 +333,127 @@ def _plot_learning_curves(idx, models, ks, plots_dir: Path) -> None:
             ax.tick_params(labelsize=8)
 
             if col_j == 0:
-                ax.set_ylabel(f"{model_short}\nAccuracy@k", fontsize=8)
+                ax.set_ylabel(f"{model_short}\n{ylabel}", fontsize=8)
             if is_top_right:
                 ax.legend(fontsize=8, loc="lower right")
 
-    fig.suptitle("Learning curves", fontsize=13, fontweight="bold")
+    fig.suptitle(title, fontsize=13, fontweight="bold")
     fig.tight_layout()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = plots_dir / f"learning_curves_{ts}.png"
+    out = plots_dir / f"{filename_prefix}_{ts}.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
 
+
+def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
+    """Plot precision vs recall, with one curve per checkpoint epoch."""
+    grouped: Dict = {}
+    for r in rows:
+        key = (r["model"], r["checkpoint_type"], r["epoch"], r["k"])
+        grouped.setdefault(key, []).append(r)
+
+    series_by_run: Dict = {}
+    for (model, checkpoint_type, epoch, k), group_rows in grouped.items():
+        precision = sum(r["precision_at_k"] for r in group_rows) / len(group_rows)
+        recall = sum(r["recall_at_k"] for r in group_rows) / len(group_rows)
+        series_by_run.setdefault((model, checkpoint_type, epoch), []).append(
+            (k, recall, precision)
+        )
+
+    models = sorted({model for model, _, _ in series_by_run})
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    markers = {
+        "pretrained": "x",
+        "series": "o",
+        "subseries": "s",
+    }
+    colors_by_type = {
+        "series": plt.cm.Blues,
+        "subseries": plt.cm.Oranges,
+    }
+    epochs_by_type = {
+        checkpoint_type: sorted(
+            {
+                epoch
+                for _, ckpt_type, epoch in series_by_run
+                if ckpt_type == checkpoint_type and isinstance(epoch, int)
+            }
+        )
+        for checkpoint_type in ("series", "subseries")
+    }
+
+    for (model, checkpoint_type, epoch), points in sorted(
+        series_by_run.items(), key=lambda item: _pr_curve_sort_key(item[0])
+    ):
+        points = sorted(points, key=lambda p: p[0])
+        _, recall_vals, precision_vals = zip(*points)
+        model_short = model.rsplit("/", 1)[-1]
+        label_parts = []
+        if len(models) > 1:
+            label_parts.append(model_short)
+        label_parts.append(checkpoint_type)
+        if isinstance(epoch, int):
+            label_parts.append(f"epoch {epoch}")
+        label = " ".join(label_parts)
+        color = _pr_curve_color(
+            checkpoint_type=checkpoint_type,
+            epoch=epoch,
+            epochs_by_type=epochs_by_type,
+            colors_by_type=colors_by_type,
+        )
+        ax.plot(
+            recall_vals,
+            precision_vals,
+            marker=markers.get(checkpoint_type, "o"),
+            markersize=3,
+            linewidth=1.4 if isinstance(epoch, int) else 1.8,
+            linestyle="--" if checkpoint_type == "pretrained" else "-",
+            color=color,
+            alpha=0.85,
+            label=label,
+        )
+
+    fig.suptitle("Precision vs Recall", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=8, loc="best")
+    fig.tight_layout()
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = plots_dir / f"precision_vs_recall_curves_{ts}.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
+
+
+def _pr_curve_sort_key(key):
+    model, checkpoint_type, epoch = key
+    type_order = {"pretrained": 0, "series": 1, "subseries": 2}
+    epoch_order = -1 if epoch == "pretrained" else int(epoch)
+    return (model, type_order.get(checkpoint_type, 99), epoch_order)
+
+
+def _pr_curve_color(
+    *,
+    checkpoint_type: str,
+    epoch,
+    epochs_by_type: Dict,
+    colors_by_type: Dict,
+):
+    if checkpoint_type == "pretrained":
+        return "gray"
+    epochs = epochs_by_type.get(checkpoint_type, [])
+    if not isinstance(epoch, int) or not epochs:
+        return None
+    if len(epochs) == 1:
+        position = 0.65
+    else:
+        position = 0.35 + 0.55 * (epochs.index(epoch) / (len(epochs) - 1))
+    return colors_by_type[checkpoint_type](position)
 
 
 # ---------------------------------------------------------------------------
@@ -266,10 +465,14 @@ def main() -> None:
         description="Evaluate all checkpoints for one dataset and summarise results."
     )
     parser.add_argument("--config", default="eval_config.json")
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Recompute embeddings/distances even when existing pairwise outputs are present.",
+    )
     parser.add_argument(
         "--skip-existing", action="store_true",
-        help="Skip a run entirely if its metrics CSV exists; skip only cli if distances exist.",
+        help="Skip a run entirely if both metrics CSVs exist.",
     )
     args = parser.parse_args()
 
@@ -294,21 +497,75 @@ def main() -> None:
                 skip_existing=args.skip_existing,
             )
         except subprocess.CalledProcessError as e:
-            tqdm.write(f"\nERROR: run failed for {run['label']} (exit {e.returncode})", file=sys.stderr)
+            tqdm.write(
+                f"\nERROR: run failed for {run['label']} (exit {e.returncode})",
+                file=sys.stderr,
+            )
             sys.exit(e.returncode)
 
     print("\nAll runs complete. Generating summary...")
 
-    rows = _collect_results(runs, cfg["step3_base"])
-    if not rows:
+    accuracy_rows = _collect_accuracy_results(runs)
+    pr_rows = _collect_precision_recall_results(runs)
+    if not accuracy_rows and not pr_rows:
         print("No results to summarise.")
         return
 
-    summary_path = Path(cfg["step3_base"]) / f"summary_{cfg['dataset']}.csv"
-    _write_summary_csv(rows, summary_path)
+    step3_base = Path(cfg["step3_base"])
+    if accuracy_rows:
+        summary_path = step3_base / f"summary_{cfg['dataset']}.csv"
+        _write_summary_csv(
+            accuracy_rows,
+            summary_path,
+            ["model", "checkpoint_type", "epoch", "k", "accuracy_at_k"],
+        )
 
-    plots_dir = Path(cfg["step3_base"]) / "plots" / cfg["dataset"]
-    _make_plots(rows, plots_dir)
+    if pr_rows:
+        pr_summary_path = step3_base / f"summary_precision_recall_{cfg['dataset']}.csv"
+        _write_summary_csv(
+            pr_rows,
+            pr_summary_path,
+            [
+                "model",
+                "checkpoint_type",
+                "epoch",
+                "k",
+                "hits",
+                "precision_denom",
+                "recall_denom",
+                "precision_at_k",
+                "recall_at_k",
+            ],
+        )
+        precision_rows = [
+            {
+                "model": r["model"],
+                "checkpoint_type": r["checkpoint_type"],
+                "epoch": r["epoch"],
+                "k": r["k"],
+                "hits": r["hits"],
+                "precision_denom": r["precision_denom"],
+                "precision_at_k": r["precision_at_k"],
+            }
+            for r in pr_rows
+        ]
+        precision_summary_path = step3_base / f"summary_precision_at_k_{cfg['dataset']}.csv"
+        _write_summary_csv(
+            precision_rows,
+            precision_summary_path,
+            [
+                "model",
+                "checkpoint_type",
+                "epoch",
+                "k",
+                "hits",
+                "precision_denom",
+                "precision_at_k",
+            ],
+        )
+
+    plots_dir = step3_base / "plots" / cfg["dataset"]
+    _make_plots(accuracy_rows, pr_rows, plots_dir, cfg["eval_k"])
 
 
 if __name__ == "__main__":
