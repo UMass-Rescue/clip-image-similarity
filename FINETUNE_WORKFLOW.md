@@ -237,7 +237,7 @@ The summary CSVs contain:
 - `summary_precision_recall_<dataset_name>.csv`: Precision@k and Recall@k, including hit and denominator counts.
 - `summary_precision_at_k_<dataset_name>.csv`: Precision@k only, as a compact CSV for precision-at-k analysis.
 
-The plots folder contains learning-curve plots for Accuracy@k and Precision@k at the configured `eval_k` values, plus a Precision-vs-Recall plot with one curve per fine-tuning epoch. Each point on those curves is a k value, and duplicate rows for the same model/checkpoint/epoch/k are averaged. All are evaluated against the same held-out test split.
+The plots folder contains learning-curve plots for Accuracy@k and Precision@k at the configured `eval_k` values, plus separate Precision-vs-Recall plots for series epochs and sub-series epochs. The pretrained baseline appears in both Precision-vs-Recall plots. Each point on those curves is a k value, and duplicate rows for the same model/checkpoint/epoch/k are averaged. All are evaluated against the same held-out test split.
 
 Please send us the CSVs under `<output_dir>/step3_eval/` and the plots in `<output_dir>/step3_eval/plots/<dataset_name>/`.
 

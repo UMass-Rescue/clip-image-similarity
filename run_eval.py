@@ -362,7 +362,29 @@ def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
             (k, recall, precision)
         )
 
-    models = sorted({model for model, _, _ in series_by_run})
+    for checkpoint_type in ("series", "subseries"):
+        _plot_precision_vs_recall_for_checkpoint_type(
+            series_by_run=series_by_run,
+            target_checkpoint_type=checkpoint_type,
+            plots_dir=plots_dir,
+        )
+
+
+def _plot_precision_vs_recall_for_checkpoint_type(
+    *,
+    series_by_run: Dict,
+    target_checkpoint_type: str,
+    plots_dir: Path,
+) -> None:
+    curves = {
+        key: points
+        for key, points in series_by_run.items()
+        if key[1] in {"pretrained", target_checkpoint_type}
+    }
+    if not any(key[1] == target_checkpoint_type for key in curves):
+        return
+
+    models = sorted({model for model, _, _ in curves})
     fig, ax = plt.subplots(figsize=(9, 6.5))
     markers = {
         "pretrained": "x",
@@ -374,18 +396,17 @@ def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
         "subseries": plt.cm.Oranges,
     }
     epochs_by_type = {
-        checkpoint_type: sorted(
+        target_checkpoint_type: sorted(
             {
                 epoch
-                for _, ckpt_type, epoch in series_by_run
-                if ckpt_type == checkpoint_type and isinstance(epoch, int)
+                for _, ckpt_type, epoch in curves
+                if ckpt_type == target_checkpoint_type and isinstance(epoch, int)
             }
         )
-        for checkpoint_type in ("series", "subseries")
     }
 
-    for (model, checkpoint_type, epoch), points in sorted(
-        series_by_run.items(), key=lambda item: _pr_curve_sort_key(item[0])
+    for (model, curve_checkpoint_type, epoch), points in sorted(
+        curves.items(), key=lambda item: _pr_curve_sort_key(item[0])
     ):
         points = sorted(points, key=lambda p: p[0])
         _, recall_vals, precision_vals = zip(*points)
@@ -393,12 +414,12 @@ def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
         label_parts = []
         if len(models) > 1:
             label_parts.append(model_short)
-        label_parts.append(checkpoint_type)
+        label_parts.append(curve_checkpoint_type)
         if isinstance(epoch, int):
             label_parts.append(f"epoch {epoch}")
         label = " ".join(label_parts)
         color = _pr_curve_color(
-            checkpoint_type=checkpoint_type,
+            checkpoint_type=curve_checkpoint_type,
             epoch=epoch,
             epochs_by_type=epochs_by_type,
             colors_by_type=colors_by_type,
@@ -406,16 +427,17 @@ def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
         ax.plot(
             recall_vals,
             precision_vals,
-            marker=markers.get(checkpoint_type, "o"),
+            marker=markers.get(curve_checkpoint_type, "o"),
             markersize=3,
             linewidth=1.4 if isinstance(epoch, int) else 1.8,
-            linestyle="--" if checkpoint_type == "pretrained" else "-",
+            linestyle="--" if curve_checkpoint_type == "pretrained" else "-",
             color=color,
             alpha=0.85,
             label=label,
         )
 
-    fig.suptitle("Precision vs Recall", fontsize=13, fontweight="bold")
+    title_type = "Series" if target_checkpoint_type == "series" else "Sub-Series"
+    fig.suptitle(f"Precision vs Recall ({title_type} Epochs)", fontsize=13, fontweight="bold")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_xlim(0.0, 1.0)
@@ -424,7 +446,7 @@ def _plot_precision_vs_recall_curves(rows: List[Dict], plots_dir: Path) -> None:
     ax.legend(fontsize=8, loc="best")
     fig.tight_layout()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = plots_dir / f"precision_vs_recall_curves_{ts}.png"
+    out = plots_dir / f"precision_vs_recall_{target_checkpoint_type}_curves_{ts}.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
