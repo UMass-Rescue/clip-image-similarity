@@ -199,11 +199,15 @@ cd src
 bash <output_dir>/configs/run_finetune.sh
 ```
 
-The workflow fine-tunes `hf-hub:timm/ViT-SO400M-16-SigLIP2-384` for 9 epochs and writes checkpoints under:
+The workflow fine-tunes `hf-hub:timm/ViT-SO400M-16-SigLIP2-384` for 39 epochs and writes checkpoints under:
 
 ```text
 <output_dir>/step2_finetune_logs/
 ```
+
+For the default 39-epoch run, the generated fine-tuning command keeps the
+learning-rate schedule for epochs 1 through 9 identical to the earlier 9-epoch
+workflow, then uses a lower extension learning rate for epochs 10 through 39.
 
 ## 3. Evaluate Checkpoints
 

@@ -16,6 +16,8 @@ DEVICE=cuda
 SAVE_FREQUENCY=3
 REPORT_TO=tensorboard
 SIGLIP=1
+LR_SCHEDULE_PREFIX_EPOCHS=
+LR_EXTENSION_LR=
 
 usage() {
   cat <<'EOF'
@@ -44,6 +46,8 @@ Optional:
   --workers <int>                       Default: 4
   --device <device>                     Default: cuda
   --save-frequency <int>                Default: 3
+  --lr-schedule-prefix-epochs <int>     Preserve a shorter cosine LR schedule through this epoch.
+  --lr-extension-lr <float>             Restart LR for epochs after --lr-schedule-prefix-epochs.
   --report-to <target>                  Default: tensorboard
   --no-siglip                           Do not pass --siglip to open_clip_train.
   -h, --help                            Show this help.
@@ -76,6 +80,8 @@ while [[ $# -gt 0 ]]; do
     --logs-dir) LOGS_DIR="$2"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
     --save-frequency) SAVE_FREQUENCY="$2"; shift 2 ;;
+    --lr-schedule-prefix-epochs) LR_SCHEDULE_PREFIX_EPOCHS="$2"; shift 2 ;;
+    --lr-extension-lr) LR_EXTENSION_LR="$2"; shift 2 ;;
     --report-to) REPORT_TO="$2"; shift 2 ;;
     --no-siglip) SIGLIP=0; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -138,6 +144,14 @@ COMMON_ARGS=(
 
 if [[ "$SIGLIP" == "1" ]]; then
   COMMON_ARGS+=(--siglip)
+fi
+
+if [[ -n "$LR_SCHEDULE_PREFIX_EPOCHS" ]]; then
+  COMMON_ARGS+=(--lr-schedule-prefix-epochs "$LR_SCHEDULE_PREFIX_EPOCHS")
+fi
+
+if [[ -n "$LR_EXTENSION_LR" ]]; then
+  COMMON_ARGS+=(--lr-extension-lr "$LR_EXTENSION_LR")
 fi
 
 echo -e "\n=== Finetune on series ==="

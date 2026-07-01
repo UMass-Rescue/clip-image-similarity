@@ -125,6 +125,52 @@ def test_generate_workflow_files_points_configs_at_decode_checked_labels(tmp_pat
     )
 
 
+def test_generate_workflow_files_uses_fixed_lr_prefix_for_extended_runs(tmp_path):
+    image = _write_image(tmp_path / "images" / "image.png")
+    labels_path = _write_labels(
+        tmp_path / "labels.json",
+        {"series_a": [image.as_posix()]},
+    )
+
+    generated = generate_workflow_files(
+        {
+            "dataset_name": "dataset",
+            "image_dir": tmp_path / "images",
+            "labels_json": labels_path,
+            "output_dir": tmp_path / "workflow",
+        },
+        epochs=39,
+    )
+
+    run_finetune = generated["run_finetune"].read_text()
+    assert "--epochs 39" in run_finetune
+    assert "--lr-schedule-prefix-epochs 9" in run_finetune
+    assert "--lr-extension-lr 1e-06" in run_finetune
+
+
+def test_generate_workflow_files_omits_fixed_lr_prefix_for_prefix_length_runs(tmp_path):
+    image = _write_image(tmp_path / "images" / "image.png")
+    labels_path = _write_labels(
+        tmp_path / "labels.json",
+        {"series_a": [image.as_posix()]},
+    )
+
+    generated = generate_workflow_files(
+        {
+            "dataset_name": "dataset",
+            "image_dir": tmp_path / "images",
+            "labels_json": labels_path,
+            "output_dir": tmp_path / "workflow",
+        },
+        epochs=9,
+    )
+
+    run_finetune = generated["run_finetune"].read_text()
+    assert "--epochs 9" in run_finetune
+    assert "--lr-schedule-prefix-epochs" not in run_finetune
+    assert "--lr-extension-lr" not in run_finetune
+
+
 def test_generate_workflow_files_points_configs_at_deduplicated_labels(tmp_path):
     original = _write_image(tmp_path / "images" / "original.png")
     duplicate = _write_image(tmp_path / "images" / "duplicate.png")

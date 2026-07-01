@@ -24,6 +24,8 @@ DISTANCE_THRESHOLD = 0.3
 EVAL_K = [1, 5, 10, 20]
 SAVE_FREQUENCY = 3
 DEFAULT_EPOCHS = 39
+DEFAULT_LR_SCHEDULE_PREFIX_EPOCHS = 9
+DEFAULT_LR_EXTENSION_LR = 1e-6
 DATA_CONFIG_NAME = "data_config.json"
 TEST_EVAL_CONFIG_NAME = "test_eval_config.json"
 RUN_FINETUNE_NAME = "run_finetune.sh"
@@ -178,6 +180,8 @@ def generate_workflow_files(
     cfg: Dict[str, Any],
     *,
     epochs: int,
+    lr_schedule_prefix_epochs: int | None = DEFAULT_LR_SCHEDULE_PREFIX_EPOCHS,
+    lr_extension_lr: float = DEFAULT_LR_EXTENSION_LR,
     deduplicate_images: bool = False,
     phash_threshold: int = DEFAULT_PHASH_THRESHOLD,
 ) -> Dict[str, Path]:
@@ -259,6 +263,10 @@ def generate_workflow_files(
             logs_dir=logs_dir,
             dataset_name=dataset_name,
             epochs=epochs,
+            lr_schedule_prefix_epochs=lr_schedule_prefix_epochs
+            if lr_schedule_prefix_epochs is not None and epochs > lr_schedule_prefix_epochs
+            else None,
+            lr_extension_lr=lr_extension_lr,
         ),
         encoding="utf-8",
     )
@@ -582,7 +590,13 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def build_run_finetune_script(
-    *, data_dir: Path, logs_dir: Path, dataset_name: str, epochs: int
+    *,
+    data_dir: Path,
+    logs_dir: Path,
+    dataset_name: str,
+    epochs: int,
+    lr_schedule_prefix_epochs: int | None = None,
+    lr_extension_lr: float = DEFAULT_LR_EXTENSION_LR,
 ) -> str:
     args = [
         "bash",
@@ -600,6 +614,15 @@ def build_run_finetune_script(
         "--save-frequency",
         str(SAVE_FREQUENCY),
     ]
+    if lr_schedule_prefix_epochs is not None:
+        args.extend(
+            [
+                "--lr-schedule-prefix-epochs",
+                str(lr_schedule_prefix_epochs),
+                "--lr-extension-lr",
+                f"{lr_extension_lr:g}",
+            ]
+        )
     return "#!/usr/bin/env bash\nset -euo pipefail\n\n" + shell_join(args) + "\n"
 
 
